@@ -143,6 +143,8 @@ Send them:
 
 Test in both directions once both sides are done. With no old configuration in the way, results reflect XTAP alone.
 
+First, have both admins run [Test-XtapPartner.ps1](Test-XtapPartner.ps1) with the other tenant as `-PartnerTenantId` and the agreed capabilities as `-ExpectedCapability`. Fix any FAIL results before testing in Outlook. The script checks configuration only; the Outlook tests below are what prove it works for users.
+
 - **Free/Busy**: a user in your tenant creates a meeting in Outlook (desktop or web) and adds a partner user. Scheduling Assistant should show their availability at the level *their* tenant granted. Then have a partner user do the same with one of your users.
 - **MailTips** (if granted): address a partner user who has automatic replies turned on; the MailTip should appear before sending.
 - **Calendar Sharing** (if granted): share a calendar with a partner user and confirm they can open it at the granted level.

@@ -8,5 +8,6 @@ Moving cross-tenant Free/Busy, MailTips, and Calendar Sharing between operating-
 | 2. [Migration Checklist](02-migration-checklist.md) | Runbook: discovery, prerequisites, Graph REST calls in PowerShell, cutover and validation, cleanup, per-pairing tracking |
 | 3. [New Partner Setup](03-new-partner-setup.md) | Runbook for net-new sharing where no EWS-era config exists: choosing capabilities, setup on each side, validation, removal |
 | [Enable-XtapPartner.ps1](Enable-XtapPartner.ps1) | Script for the PowerShell steps of either runbook: sign-in, M365 Collaboration trust (Layer 2), and one capability grant (Layer 3). Use it alongside a runbook, not instead of one. It never touches cross-tenant access or trust settings (Layer 1), which are done in the Entra admin center. Run `Get-Help .\Enable-XtapPartner.ps1 -Full` for usage. |
+| [Test-XtapPartner.ps1](Test-XtapPartner.ps1) | Read-only check of one partner, or every partner, in a tenant: partner entry, trust settings, M365 Collaboration trust, capabilities, and any tenant-wide default grants. PASS/WARN/FAIL report, optional CSV. Needs only Global Reader. Doesn't check old EWS-era config or prove Free/Busy works for users. |
 
 Diagrams are standalone SVG files in `images/` and render in both GitHub and Azure DevOps.

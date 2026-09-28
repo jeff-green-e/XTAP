@@ -199,6 +199,8 @@ Invoke-RestMethod -Method Post `
 
 **Old configuration takes precedence over XTAP.** While an Organization Relationship, Sharing Policy rule, or Availability Address Space for the partner is still active, Outlook uses it, so testing with both in place proves nothing about the new path. Cut over one pairing at a time: turn the old configuration off on **both** tenants, then test right away. Agree a time with the partner's admin so both sides switch together, since users lose cross-tenant free/busy between the switch and a successful test (or a rollback).
 
+**Before you switch**, have both admins run [Test-XtapPartner.ps1](Test-XtapPartner.ps1) with the other tenant as `-PartnerTenantId` and the agreed capabilities as `-ExpectedCapability`. Don't cut over until both sides have no FAIL results. It only needs read access, and `-CsvPath` saves the output for the change record.
+
 **1. Back up and turn off the old configuration, on both tenants:**
 
 ```powershell
