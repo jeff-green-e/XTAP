@@ -1,6 +1,6 @@
 # Cross-Tenant Calendar Sharing Migration Checklist (EWS → M365 XTAP)
 
-Last updated: September 25, 2026. If you haven't read it yet, start with [How It Works](01-how-it-works.md) for the concepts and diagrams behind these steps.
+Last updated: September 28, 2026. If you haven't read it yet, start with [How It Works](01-how-it-works.md) for the concepts and diagrams behind these steps.
 
 ## Overview
 
@@ -12,7 +12,11 @@ Microsoft is retiring Exchange Web Services (EWS) in Exchange Online: soft block
 | 2. M365 Collaboration trust | A per-partner inbound trust flag (`m365CollaborationInbound`) that must be on before Layer 3 does anything | Microsoft Graph (beta); no portal UI yet |
 | 3. M365 capabilities | The actual grants: Free/Busy (basic/detail), MailTips, Calendar Sharing (simple/detail/reviewer), plus anonymous variants | Microsoft Graph (beta); no portal UI yet |
 
-For each pair of operating companies that shares calendars/free-busy, both tenants must configure Layers 2 and 3 pointing at each other; this is bidirectional and asymmetric (each side grants what it shares outward).
+**What "inbound" means in this checklist.** Every XTAP setting is configured on one tenant and names one partner tenant. *Inbound* means requests from the partner's users coming *into* the tenant you're configuring. Granting an inbound capability lets the partner's users see this tenant's data. So on Op-Co A's tenant, an inbound Free/Busy grant for Op-Co B lets B's users see A's free/busy.
+
+For each pair of operating companies that shares calendars/free-busy, both tenants must configure Layers 2 and 3 pointing at each other. This is bidirectional and can be asymmetric: each side decides what the other side may see of it, and the two sides don't have to grant the same level.
+
+**How the work repeats.** For each op-co tenant: sign in once (Step 2), then run Steps 3 and 4 once for *each* partner that tenant shares with. Then switch to the next op-co tenant and repeat. A pairing is complete only when both tenants have run Steps 3 and 4 for each other.
 
 ## Step 1: Discovery
 
@@ -42,25 +46,44 @@ Get-OrganizationRelationship | Format-List Name, DomainNames, Enabled, FreeBusyA
 # Sharing Policies (calendar sharing, incl. anonymous publishing)
 Get-SharingPolicy | Format-List Name, Domains, Enabled, Default
 
+# Which mailboxes use which Sharing Policy (a blank name means the Default policy)
+Get-Mailbox -ResultSize Unlimited | Group-Object SharingPolicy | Select-Object Count, Name
+
 # Availability Address Spaces (legacy free/busy trust, often cross-forest/hybrid-adjacent)
 Get-AvailabilityAddressSpace | Format-List
 ```
 
-A tenant is in scope for this migration if `Get-SharingPolicy` shows `Enabled: True`, a `Domains` rule with a `CalendarSharingFreeBusy` access level (Simple, Detail, or Reviewer), the external org is hosted in Microsoft 365, and the policy is assigned to one or more mailboxes. Note: `Anonymous:`-prefixed rules are calendar publishing to the public internet, not tenant-to-tenant sharing; call those out separately.
+A partner relationship is in scope for this migration if the partner org is hosted in Microsoft 365 and **any** of the following is true:
 
-Record, per op-co: which partner op-cos it currently shares with, and at what level (availability-only vs. full detail vs. calendar publish).
+- **Organization Relationship**: `Enabled: True` with `FreeBusyAccessEnabled: True` and/or `MailTipsAccessEnabled: True` for the partner's domains.
+- **Sharing Policy**: `Enabled: True`, a `Domains` rule for the partner's domain with a `CalendarSharingFreeBusy` access level (Simple, Detail, or Reviewer), and the policy is assigned to one or more mailboxes (per the `Get-Mailbox` grouping above).
+- **Availability Address Space**: an entry whose `ForestName` is the partner's domain.
 
-## Step 2: Prerequisites
+`Anonymous:`-prefixed Sharing Policy rules are calendar publishing to the public internet, not tenant-to-tenant sharing; call those out separately.
 
-- **Sign in with your own Global Admin identity: no app registration, certificate, or service principal.** This uses delegated auth via OAuth2 device-code flow against Microsoft's first-party "Microsoft Graph Command Line Tools" public client, which is pre-registered in every tenant, so there is nothing to create or configure ahead of time.
+Record, per op-co: which partner op-cos it currently shares with, through which mechanism, and at what level (availability-only vs. full detail vs. calendar publish). This is the baseline you'll validate against in Step 5.
+
+## Step 2: Prerequisites and sign-in
+
+Check these before running anything:
+
+- **Role required**: Security Administrator or Global Administrator in each tenant (Cross-Tenant Access Policy is a sensitive Entra permission).
+- **Partner tenant IDs**: collect the Entra Tenant ID for every op-co that will be part of a sharing pair. Each op-co admin can find their own in Entra admin center → Overview → Tenant ID. Add these to the [pairings table](#per-pairing-tracking) before starting Layer 2/3 work, since every pairing needs the *other* tenant's ID.
+- **Confirm Layer 1 already exists**: each partner op-co should already appear as a configured organization under Entra ID → External Identities → Cross-tenant access settings → Organizational settings. Layers 2/3 are configured against that same partner tenant ID. No separate B2B setup is needed if it's already there; if a pairing is missing from that list entirely, it needs standard B2B org settings first.
+- **No domain federation involved: this is a deliberate change from EWS.** The old EWS-based Free/Busy setup relied on domain-based federation (Microsoft Federation Gateway), which sometimes required a partner's `*.onmicrosoft.com` default domain to be present in the trust chain even after mailboxes were fully online. XTAP has no equivalent: every partner relationship (Layer 1 B2B and Layer 2/3 M365 Collaboration) is keyed purely on the partner's **Entra Tenant ID (GUID)**; there's no `DomainNames` parameter anywhere in the XTAP object model. Don't chase down onmicrosoft.com domains for this migration; the Tenant ID is the only identifier needed per op-co.
+
+How the sign-in works:
+
+- **You sign in with your own admin account: no app registration, certificate, or service principal.** This uses delegated auth via OAuth2 device-code flow against Microsoft's first-party "Microsoft Graph Command Line Tools" public client, which is pre-registered in every tenant, so there is nothing to create or configure ahead of time.
 - **Entirely cloud-based, run from wherever you execute PowerShell.** No server, no on-prem footprint, no persistent credential to manage. Each session needs an interactive browser sign-in (the device-code flow gives you a URL and a one-time code to enter); the token that comes back is short-lived (roughly 60 to 90 minutes) and tied to you, not to a standing app identity.
+- **Run this once per op-co tenant**, setting `$tenantId` to the tenant you're configuring. The token only works against that tenant.
 
 ```powershell
-# Delegated auth via device-code flow: signs in as YOU (Global Admin), no app
+# Delegated auth via device-code flow: signs in as YOU, no app
 # registration, certificate, or secret required.
-$tenantId = "<your-tenant-id>"
+$tenantId = "<your-tenant-id>"  # the op-co tenant you are configuring right now
 $clientId = "14d82eec-204b-4c2f-b7e8-296a70dab67e"  # Microsoft Graph Command Line Tools (Microsoft first-party public client)
-$scope    = "https://graph.microsoft.com/Policy.ReadWrite.CrossTenantAccess"
+$scope    = "https://graph.microsoft.com/Policy.ReadWrite.CrossTenantAccess https://graph.microsoft.com/Policy.ReadWrite.CrossTenantCapability"
 
 $deviceCodeResponse = Invoke-RestMethod -Method Post `
     -Uri "https://login.microsoftonline.com/$tenantId/oauth2/v2.0/devicecode" `
@@ -91,18 +114,15 @@ $headers = @{ Authorization = "Bearer $($token.access_token)" }
 # Reuse $headers on every call in Steps 3 and 4
 ```
 
-The first time you run this in a given tenant, the sign-in prompt will ask you to consent to the `Policy.ReadWrite.CrossTenantAccess` **delegated** permission for your account; accept it once per tenant. No separate permission grant is needed beyond your existing Global Administrator or Security Administrator role; the consent prompt is just Entra confirming you want *this* application (Microsoft Graph Command Line Tools) to use that permission on your behalf.
-
-- **Role required**: Security Administrator or Global Administrator in each tenant (Cross-Tenant Access Policy is a sensitive Entra permission).
-- **Partner tenant IDs**: collect the Entra Tenant ID for every op-co that will be part of a sharing pair. Each op-co admin can find their own in Entra admin center → Overview → Tenant ID. Add these to the tracking table below before starting Layer 2/3 work, since every pairing needs the *other* tenant's ID.
-- **No domain federation involved: this is a deliberate change from EWS.** The old EWS-based Free/Busy setup relied on domain-based federation (Microsoft Federation Gateway), which sometimes required a partner's `*.onmicrosoft.com` default domain to be present in the trust chain even after mailboxes were fully online. XTAP has no equivalent: every partner relationship (Layer 1 B2B and Layer 2/3 M365 Collaboration) is keyed purely on the partner's **Entra Tenant ID (GUID)**; there's no `DomainNames` parameter anywhere in the XTAP object model. Don't chase down onmicrosoft.com domains for this migration; the Tenant ID is the only identifier needed per op-co.
-- **Confirm Layer 1 already exists**: the op-cos already show up as configured organizations under Entra ID → External Identities → Cross-tenant access settings → Organizational settings. Layers 2/3 are configured *against* that same partner tenant ID; no separate B2B setup is needed if it's already there, but if a pairing is missing from that list entirely, it'll need standard B2B org settings first.
+The first time you run this in a tenant, you'll be asked to consent to two **delegated** permissions; accept them once per tenant. `Policy.ReadWrite.CrossTenantAccess` covers the partner trust settings (Step 3). `Policy.ReadWrite.CrossTenantCapability` covers the `m365Capabilities` grants (Step 4); without it, the Step 4 call is rejected even for a Global Administrator. Consent only approves this application acting with your existing admin role; it doesn't grant you any new rights.
 
 ## Step 3: Enable M365 Collaboration trust (Layer 2)
 
-For each partner tenant, turn on the inbound M365 Collaboration trust level before granting any capability; capability grants in Step 4 do nothing without this. There's no portal exposure yet for this step; it's a REST call against the partner's tenant ID:
+Run once per partner tenant, from the tenant you signed in to in Step 2. Turn on the inbound M365 Collaboration trust before granting any capability; capability grants in Step 4 do nothing without it. There's no portal UI for this step yet; it's a REST call against the partner's tenant ID:
 
 ```powershell
+$partnerTenantId = "<partner-tenant-id>"  # the partner op-co this tenant is trusting; also used in Step 4
+
 # Enable M365 Collaboration inbound trust for a specific partner tenant
 # Only MFA is trusted in this scenario; device compliance and hybrid Entra join are
 # NOT accepted as substitutes, so both are explicitly false rather than omitted.
@@ -117,17 +137,16 @@ $body = @{
 Invoke-RestMethod -Method Patch `
     -Uri "https://graph.microsoft.com/beta/policies/crossTenantAccessPolicy/partners/$partnerTenantId" `
     -Headers $headers -ContentType "application/json" -Body $body
-# Note: the exact property that flips on "m365CollaborationInbound" specifically is still
-# moving on the beta surface; confirm the current field name against Microsoft Learn's
-# migration doc before running this against a production tenant.
 ```
+
+In testing, this call was enough for the Step 4 capability grant to succeed. The beta API is still changing, though, and Microsoft may add a dedicated `m365CollaborationInbound` property. Check the current syntax against the [Microsoft Learn migration guide](https://learn.microsoft.com/en-us/exchange/sharing/migrate-to-m365-xtap) before running this against a production tenant.
 
 ## Step 4: Grant M365 capabilities (Layer 3)
 
-Once Layer 2 trust is on for a partner, grant the specific capabilities that partner should receive **inbound** (i.e., what the *other* tenant's users can see of *this* tenant). Example, Free/Busy only:
+Once Layer 2 trust is on for a partner, grant the capabilities that partner's users should have **inbound**, meaning what they may see of *this* tenant. Uses the same `$partnerTenantId` as Step 3. Example, Free/Busy only:
 
 ```powershell
-# Grant an inbound M365 capability from a specific partner tenant
+# Grant an inbound M365 capability to a specific partner tenant
 # Example: availability-only free/busy (crossTenantCalendarAvailabilityBasic)
 # Other capability values: crossTenantCalendarAvailabilityDetail (time+subject+location),
 #   crossTenantMailTipsBasic / crossTenantMailTipsDetail,
@@ -149,42 +168,60 @@ Invoke-RestMethod -Method Post `
     -Headers $headers -ContentType "application/json" -Body $body
 ```
 
-**Bidirectional, asymmetric**: this call only grants what flows *inbound* into the tenant it's run against. For Op-Co A and Op-Co B to see each other's free/busy, this must run twice: once on A's tenant granting inbound access to B, once on B's tenant granting inbound access to A. Match the capability level (`Basic`/`Detail`, `Simple`/`Detail`/`Reviewer`) to what Step 1's discovery showed was in use under the old Organization Relationship, unless the business wants to change the sharing level as part of this migration.
+**Both sides must run this.** The call only affects the tenant it's run against. For Op-Co A and Op-Co B to see each other's free/busy, run it on A's tenant with B as the partner, and on B's tenant with A as the partner. Match the capability level (`Basic`/`Detail`, `Simple`/`Detail`/`Reviewer`) to what Step 1's discovery showed was in use, unless the business wants to change the sharing level as part of this migration.
 
 ## Step 5: Validation
 
 Before touching the old EWS-based config, confirm the new path actually works:
 
-- **Free/Busy**: in Outlook (desktop or OWA), have a user in Op-Co A create a meeting and add a user from Op-Co B as an attendee. Scheduling Assistant should show B's availability at the granted level (free/busy only, or with subject/location if Detail was granted).
-- **MailTips**: check that out-of-office / automatic-reply MailTips surface correctly when addressing a user in the partner org, if MailTips capability was granted.
+- **Free/Busy**: in Outlook (desktop or OWA), have a user in Op-Co A create a meeting and add a user from Op-Co B as an attendee. Scheduling Assistant should show B's availability at the level B's tenant granted (free/busy only, or with subject/location if Detail was granted). Then repeat in the other direction.
+- **MailTips**: if MailTips capability was granted, check that out-of-office / automatic-reply MailTips surface correctly when addressing a user in the partner org.
 - **Calendar Sharing** (if granted beyond free/busy): have a user share their calendar with a specific partner-org user and confirm the recipient can open it.
-- **Timing**: allow a short propagation delay after the Graph capability grant before testing; this is not always instant.
-- **Cross-check against Step 1's baseline**: confirm the new path matches or exceeds what the old Organization Relationship provided, so nothing regresses for end users during cutover.
+- **Timing**: changes aren't always instant. If a test fails right after the Graph grant, wait and retry before troubleshooting, and note how long it took so later pairings have a realistic expectation.
+- **Cross-check against Step 1's baseline**: confirm the new path matches or exceeds what the old configuration provided, so nothing regresses for end users during cutover.
 
-Don't disable the old Organization Relationship until this validation passes for a given pairing; keep both live in parallel during test.
+Don't disable the old configuration until this validation passes for a given pairing; keep both live in parallel during testing.
 
 ## Step 6: Decommission old EWS-based config
 
-Once validation passes for a given pairing and both sides are confirmed on the new path:
+Once validation passes for a given pairing and both sides are confirmed on the new path, remove the old config for that partner on each tenant. Save the Step 1 discovery output first so you can restore anything you remove.
 
 ```powershell
-# Disable (don't delete right away; keep for rollback until confident)
+# Organization Relationship: disable (don't delete right away; keep for rollback)
 Set-OrganizationRelationship -Identity "<PartnerOrgRelationship>" -Enabled $false
-Set-SharingPolicy -Identity "<PartnerSharingPolicy>" -Enabled $false
+
+# Sharing Policy: remove only the partner's domain rule, NOT the whole policy.
+# Disabling the policy would also break every other sharing rule for the mailboxes
+# assigned to it (including all mailboxes on the Default policy).
+# Copy the exact rule string from Get-SharingPolicy's Domains output.
+Set-SharingPolicy -Identity "<SharingPolicyName>" -Domains @{Remove = "<partner-domain>:<AccessLevel>"}
+
+# Availability Address Space: there is no disable switch, so removal is the only option.
+# Keep the Step 1 Get-AvailabilityAddressSpace output so it can be recreated if needed.
+Remove-AvailabilityAddressSpace -Identity "<partner-domain>"
 ```
 
-- Disable rather than remove initially; remove outright only after a burn-in period (e.g., 2 to 4 weeks) with no reported issues.
+- Disable rather than remove Organization Relationships initially; remove them outright only after a burn-in period (e.g., 2 to 4 weeks) with no reported issues.
 - Do this per pairing as each is validated; don't wait to decommission everything at once, since EWS itself starts being blocked October 1, 2026 regardless.
-- Track decommission status per pairing in the table below so nothing gets missed before the hard EWS cutoff.
+- Track decommission status per pairing in the tables below so nothing gets missed before the hard EWS cutoff.
 
 ## Per-pairing tracking
 
-| Op-Co A | Op-Co B | A tenant ID | B tenant ID | Level (F/B, MailTips, Calendar) | Layer 2 (A→B) | Layer 2 (B→A) | Layer 3 (A→B) | Layer 3 (B→A) | Validated | Old config decommissioned |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-|  |  |  |  |  | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ |
-|  |  |  |  |  | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ |
+Add one row per op-co pairing identified in Step 1's discovery, using the same pairing number in both tables.
 
-Add one row per op-co pairing identified in Step 1's discovery. "A→B" means the capability granted on A's tenant that lets B's users see A's data (and vice versa).
+**Pairings:**
+
+| # | Op-Co A | A tenant ID | Op-Co B | B tenant ID | Level (F/B, MailTips, Calendar) |
+| --- | --- | --- | --- | --- | --- |
+| 1 |  |  |  |  |  |
+| 2 |  |  |  |  |  |
+
+**Status:** "On A" means configured on A's tenant with B as the partner, which lets B's users see A's data (and vice versa for "On B").
+
+| # | Layer 2 on A | Layer 2 on B | Layer 3 on A | Layer 3 on B | Validated | Old config decommissioned |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ |
+| 2 | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ |
 
 ## Key dates and references
 
