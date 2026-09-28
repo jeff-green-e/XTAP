@@ -57,7 +57,7 @@ Trust settings govern B2B guest sign-ins. Calendar sharing doesn't depend on the
 
 ## Step 2: Sign in
 
-> **Shortcut:** [Enable-XtapPartner.ps1](Enable-XtapPartner.ps1) runs Steps 2 to 4 in one go, once per capability. It checks that the Step 1 partner entry exists and won't overwrite a Layer 2 setting someone has scoped differently. Try it first with `-WhatIf`. The manual steps below show what it does.
+> **Shortcut:** [Enable-XtapPartner.ps1](Enable-XtapPartner.ps1) runs Steps 2 to 4 in one go, once per capability. It checks that the Step 1 partner entry exists and won't overwrite a Layer 2 setting someone has scoped differently. It grants to all users; to limit a grant to a security group, use the manual Step 4. Try it first with `-WhatIf`. The manual steps below show what it does.
 
 Layers 2 and 3 have no portal UI yet, so the rest of the setup uses PowerShell. Use the device-code sign-in from the [migration checklist, Step 2](02-migration-checklist.md#step-2-prerequisites-and-sign-in). Set `$tenantId` to *your* tenant and sign in as a Global Administrator. The consent prompt asks for `Policy.ReadWrite.CrossTenantAccess` and `Policy.ReadWrite.CrossTenantCapability`; accept both. You'll reuse `$headers` in the steps below.
 
@@ -101,7 +101,7 @@ Run once per capability you agreed to share. Each call grants the partner's user
 $capability = "crossTenantCalendarAvailabilityBasic"  # from the table in "Before you start"
 
 # Who in YOUR tenant the partner can see. Use one of these:
-$scope = @{ resourceId = "All"; resourceType = "user" }             # all users
+$scope = @{ resourceId = "All"; resourceType = "user" }             # all users (for Calendar Sharing capabilities, use resourceType = "group")
 # $scope = @{ resourceId = "<group-object-id>"; resourceType = "group" }  # only members of a security group
 
 $body = @{

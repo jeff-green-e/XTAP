@@ -17,6 +17,8 @@
       - Configure the partner's side. Sharing is inbound only: running this in tenant A
         lets B's users see A. B's admin runs it in B, with A as the partner.
       - Disable old EWS-era configuration (see 02).
+      - Limit a grant to a security group. It always grants to all users; for group
+        scoping, use the manual capability step in the runbook.
 
     Signs in with device-code flow as you (Global Administrator), using Microsoft's
     first-party Graph Command Line Tools client. No app registration or secret.
@@ -30,10 +32,6 @@
 
 .PARAMETER Capability
     The capability to grant. Names come from the Microsoft Learn migration guide and are case-sensitive.
-
-.PARAMETER ScopeGroupId
-    Optional object ID of a security group in your tenant. If set, the partner can only
-    see members of this group. If omitted, all users are visible.
 
 .EXAMPLE
     .\Enable-XtapPartner.ps1 -TenantId <your-tenant-id> -PartnerTenantId <partner-tenant-id> `
@@ -65,9 +63,7 @@ param(
         'crossTenantCalendarSharingFreeBusyDetail',
         'crossTenantCalendarSharingFreeBusyReviewer'
     )]
-    [string] $Capability,
-
-    [guid] $ScopeGroupId
+    [string] $Capability
 )
 
 $ErrorActionPreference = 'Stop'
@@ -176,14 +172,9 @@ if ($existing) {
     Write-Host "Layer 3: $Capability is already configured for this partner. No change. Current setting:" -ForegroundColor Green
     $existing | ConvertTo-Json -Depth 6 | Write-Host
 } else {
-    if ($ScopeGroupId) {
-        $target = @{ resourceId = "$ScopeGroupId"; resourceType = "group" }
-    } elseif ($Capability -like 'crossTenantCalendarSharing*') {
-        # Microsoft's guide uses resourceType "group" for all-users Calendar Sharing grants
-        $target = @{ resourceId = "All"; resourceType = "group" }
-    } else {
-        $target = @{ resourceId = "All"; resourceType = "user" }
-    }
+    # All users. Microsoft's guide uses resourceType "group" for Calendar Sharing, "user" for the rest.
+    $resourceType = if ($Capability -like 'crossTenantCalendarSharing*') { "group" } else { "user" }
+    $target = @{ resourceId = "All"; resourceType = $resourceType }
 
     $body = @{
         "@odata.type" = $odataType
@@ -196,10 +187,9 @@ if ($existing) {
         }
     } | ConvertTo-Json -Depth 6
 
-    $who = if ($ScopeGroupId) { "members of group $ScopeGroupId" } else { "all users" }
-    if ($PSCmdlet.ShouldProcess("partner $PartnerTenantId", "Grant $Capability ($who)")) {
+    if ($PSCmdlet.ShouldProcess("partner $PartnerTenantId", "Grant $Capability (all users)")) {
         Invoke-RestMethod -Method Post -Uri "$graphBase/m365Capabilities" -Headers $headers -Body $body @jsonParams | Out-Null
-        Write-Host "Layer 3: granted $Capability to partner ($who)." -ForegroundColor Green
+        Write-Host "Layer 3: granted $Capability to partner (all users)." -ForegroundColor Green
     }
 }
 
