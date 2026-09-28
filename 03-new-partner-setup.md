@@ -57,9 +57,12 @@ Trust settings govern B2B guest sign-ins. Calendar sharing doesn't depend on the
 
 ## Step 2: Sign in
 
-> **Shortcut:** [Enable-XtapPartner.ps1](Enable-XtapPartner.ps1) runs Steps 2 to 4 in one go. It grants Free/Busy times only by default; pass `-Capability` with one or more names from the table in "Before you start" for anything else. It checks that the Step 1 partner entry exists and won't overwrite a Layer 2 setting someone has scoped differently. It grants to all users; to limit a grant to a security group, use the manual Step 4. Try it first with `-WhatIf`. The manual steps below show what it does.
+Layers 2 and 3 have no portal UI yet, so Steps 2 to 4 use PowerShell. Choose one path:
 
-Layers 2 and 3 have no portal UI yet, so the rest of the setup uses PowerShell. Use the device-code sign-in from the [migration checklist, Step 2](02-migration-checklist.md#step-2-prerequisites-and-sign-in). Set `$tenantId` to *your* tenant and sign in as a Global Administrator. The consent prompt asks for `Policy.ReadWrite.CrossTenantAccess` and `Policy.ReadWrite.CrossTenantCapability`; accept both. You'll reuse `$headers` in the steps below.
+- **Script (recommended):** run [Enable-XtapPartner.ps1](Enable-XtapPartner.ps1). It does its own device-code sign-in and Steps 3 and 4, so **skip the rest of this step and the code blocks in Steps 3 and 4**. It checks that the Step 1 partner entry exists, won't overwrite a Layer 2 setting someone has limited or blocked, grants Free/Busy times only unless you pass `-Capability` (names in "Before you start"), always grants to all users, and can be tried first with `-WhatIf`.
+- **Manual:** run the device-code sign-in from the [migration checklist, Step 2](02-migration-checklist.md#step-2-prerequisites-and-sign-in), with `$tenantId` set to *your* tenant, signing in as a Global Administrator. Then run the code blocks in Steps 3 and 4 **in the same PowerShell window**: the sign-in sets `$headers`, which they use. If you close the window or the token expires (after roughly 60 to 90 minutes), sign in again. Use this path if you need to limit a grant to a security group.
+
+Either way, the first sign-in in a tenant asks you to consent to `Policy.ReadWrite.CrossTenantAccess` and `Policy.ReadWrite.CrossTenantCapability`; accept both.
 
 ## Step 3: Turn on M365 Collaboration trust (Layer 2)
 

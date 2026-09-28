@@ -16,7 +16,7 @@ Microsoft is retiring Exchange Web Services (EWS) in Exchange Online: soft block
 
 For each pair of operating companies that shares calendars/free-busy, both tenants must configure Layers 2 and 3 pointing at each other. This is bidirectional and can be asymmetric: each side decides what the other side may see of it, and the two sides don't have to grant the same level.
 
-**How the work repeats.** For each op-co tenant: sign in once (Step 2), then run Steps 3 and 4 once for *each* partner that tenant shares with. Then switch to the next op-co tenant and repeat. A pairing is complete only when both tenants have run Steps 3 and 4 for each other.
+**How the work repeats.** For each op-co tenant, do Steps 2 to 4 once for *each* partner that tenant shares with (the script signs in on every run; manually, one sign-in per tenant covers all its partners while the token lasts). Then switch to the next op-co tenant and repeat. A pairing is complete only when both tenants have run Steps 3 and 4 for each other.
 
 ## Step 1: Discovery
 
@@ -76,7 +76,10 @@ Check these before running anything:
 - **Layer 1 is done in the portal**: each partner op-co should already appear under Entra ID → External Identities → Cross-tenant access settings → Organizational settings. Step 3 walks through verifying it (and adding it in the portal if missing). Layers 2/3 are configured against that same partner tenant ID.
 - **No domain federation involved: this is a deliberate change from EWS.** The old EWS-based Free/Busy setup relied on domain-based federation (Microsoft Federation Gateway), which sometimes required a partner's `*.onmicrosoft.com` default domain to be present in the trust chain even after mailboxes were fully online. XTAP has no equivalent: every partner relationship (Layer 1 B2B and Layer 2/3 M365 Collaboration) is keyed purely on the partner's **Entra Tenant ID (GUID)**; there's no `DomainNames` parameter anywhere in the XTAP object model. Don't chase down onmicrosoft.com domains for this migration; the Tenant ID is the only identifier needed per op-co.
 
-> **Shortcut:** [Enable-XtapPartner.ps1](Enable-XtapPartner.ps1) runs the sign-in plus the PowerShell parts of Steps 3 and 4 in one go. It grants Free/Busy times only by default; pass `-Capability` with one or more names from the Step 4 table for anything else. You still verify Layer 1 in the portal first (Step 3). It grants to all users; to limit a grant to a security group, use the manual Step 4. Try it first with `-WhatIf`. The manual steps below show what it does.
+**Choose how to do the PowerShell work in Steps 2 to 4:**
+
+- **Script (recommended):** do the Layer 1 portal check in Step 3 first, then run [Enable-XtapPartner.ps1](Enable-XtapPartner.ps1). It does its own device-code sign-in, so **skip the sign-in code below** and the code blocks in Steps 3 and 4. It grants Free/Busy times only unless you pass `-Capability` (names in the Step 4 table), always grants to all users, and can be tried first with `-WhatIf`.
+- **Manual:** run the sign-in code below, then the code blocks in Steps 3 and 4, **all in the same PowerShell window**. The sign-in sets `$headers`, which the later blocks use. If you close the window or the token expires (after roughly 60 to 90 minutes), run the sign-in again. Use this path if you need to limit a grant to a security group.
 
 How the sign-in works:
 
