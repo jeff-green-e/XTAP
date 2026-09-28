@@ -1,0 +1,217 @@
+<#
+.SYNOPSIS
+    Turns on M365 Collaboration trust (Layer 2) and grants one M365 capability (Layer 3)
+    to a partner tenant, so the partner's users can see this tenant's Free/Busy, MailTips,
+    or shared calendars.
+
+.DESCRIPTION
+    Automates the PowerShell steps of the runbooks in this repo:
+      - 02-migration-checklist.md, Steps 2 to 4 (moving existing sharing off EWS)
+      - 03-new-partner-setup.md,  Steps 2 to 4 (sharing with a new partner)
+    Follow the runbook; this script doesn't replace it.
+
+    What it does NOT do:
+      - Create or change the partner's cross-tenant access settings (Layer 1), including
+        trust settings. Those are verified or added in the Entra admin center first
+        (02 Step 3 / 03 Step 1). If the partner entry doesn't exist, the script stops.
+      - Configure the partner's side. Sharing is inbound only: running this in tenant A
+        lets B's users see A. B's admin runs it in B, with A as the partner.
+      - Disable old EWS-era configuration (see 02).
+
+    Signs in with device-code flow as you (Global Administrator), using Microsoft's
+    first-party Graph Command Line Tools client. No app registration or secret.
+    Run once per capability; re-running is safe (existing settings are left alone).
+
+.PARAMETER TenantId
+    Your tenant: the one whose data the partner will be allowed to see.
+
+.PARAMETER PartnerTenantId
+    The partner tenant being granted access.
+
+.PARAMETER Capability
+    The capability to grant. Names come from the Microsoft Learn migration guide and are case-sensitive.
+
+.PARAMETER ScopeGroupId
+    Optional object ID of a security group in your tenant. If set, the partner can only
+    see members of this group. If omitted, all users are visible.
+
+.EXAMPLE
+    .\Enable-XtapPartner.ps1 -TenantId <your-tenant-id> -PartnerTenantId <partner-tenant-id> `
+        -Capability crossTenantCalendarAvailabilityBasic
+
+.EXAMPLE
+    # Show what would change without changing anything
+    .\Enable-XtapPartner.ps1 -TenantId <id> -PartnerTenantId <id> `
+        -Capability crossTenantMailTipsAll -WhatIf
+
+.LINK
+    https://learn.microsoft.com/en-us/exchange/sharing/migrate-to-m365-xtap
+#>
+[CmdletBinding(SupportsShouldProcess)]
+param(
+    [Parameter(Mandatory)]
+    [guid] $TenantId,
+
+    [Parameter(Mandatory)]
+    [guid] $PartnerTenantId,
+
+    [Parameter(Mandatory)]
+    [ValidateSet(
+        'crossTenantCalendarAvailabilityBasic',
+        'crossTenantCalendarAvailabilityLimitedDetails',
+        'crossTenantMailTipsLimited',
+        'crossTenantMailTipsAll',
+        'crossTenantCalendarSharingFreeBusySimple',
+        'crossTenantCalendarSharingFreeBusyDetail',
+        'crossTenantCalendarSharingFreeBusyReviewer'
+    )]
+    [string] $Capability,
+
+    [guid] $ScopeGroupId
+)
+
+$ErrorActionPreference = 'Stop'
+
+if ($TenantId -eq $PartnerTenantId) {
+    throw "TenantId and PartnerTenantId are the same. PartnerTenantId must be the OTHER tenant."
+}
+
+$graphBase  = "https://graph.microsoft.com/beta/policies/crossTenantAccessPolicy/partners/$PartnerTenantId"
+$jsonParams = @{ ContentType = "application/json" }
+
+function Get-GraphErrorCode($errorRecord) {
+    try { return ($errorRecord.ErrorDetails.Message | ConvertFrom-Json).error } catch { return $null }
+}
+
+# --- Sign in (device-code flow) ------------------------------------------------------------
+
+$clientId = "14d82eec-204b-4c2f-b7e8-296a70dab67e"  # Microsoft Graph Command Line Tools (Microsoft first-party public client)
+$scope    = "https://graph.microsoft.com/Policy.ReadWrite.CrossTenantAccess https://graph.microsoft.com/Policy.ReadWrite.CrossTenantCapability"
+
+$deviceCode = Invoke-RestMethod -Method Post `
+    -Uri "https://login.microsoftonline.com/$TenantId/oauth2/v2.0/devicecode" `
+    -Body @{ client_id = $clientId; scope = $scope }
+
+Write-Host $deviceCode.message -ForegroundColor Yellow
+Write-Host "Sign in as a Global Administrator of tenant $TenantId." -ForegroundColor Yellow
+
+$interval = [int]$deviceCode.interval
+$deadline = (Get-Date).AddSeconds([int]$deviceCode.expires_in)
+$token    = $null
+
+while (-not $token) {
+    if ((Get-Date) -gt $deadline) { throw "The sign-in code expired. Run the script again." }
+    Start-Sleep -Seconds $interval
+    try {
+        $token = Invoke-RestMethod -Method Post `
+            -Uri "https://login.microsoftonline.com/$TenantId/oauth2/v2.0/token" `
+            -Body @{
+                grant_type  = "urn:ietf:params:oauth:grant-type:device_code"
+                client_id   = $clientId
+                device_code = $deviceCode.device_code
+            }
+    } catch {
+        $err = $_
+        switch (Get-GraphErrorCode $err) {
+            'authorization_pending' { }                  # not signed in yet; keep waiting
+            'slow_down'             { $interval += 5 }   # server asked us to poll less often
+            default                 { throw $err }       # declined, expired, wrong tenant, etc.
+        }
+    }
+}
+
+$headers = @{ Authorization = "Bearer $($token.access_token)" }
+Write-Host "Signed in." -ForegroundColor Green
+
+# --- Check the partner entry exists (Layer 1 is managed in the portal) ---------------------
+
+try {
+    $partner = Invoke-RestMethod -Method Get -Uri $graphBase -Headers $headers
+} catch {
+    if ([int]$_.Exception.Response.StatusCode -eq 404) {
+        throw ("No cross-tenant access entry for partner $PartnerTenantId. Add the organization in " +
+               "Entra admin center > External Identities > Cross-tenant access settings > " +
+               "Organizational settings, verify its trust settings, then run this again.")
+    }
+    throw
+}
+
+# --- Layer 2: M365 Collaboration trust -----------------------------------------------------
+
+$current   = $partner.m365CollaborationInbound.users
+$allUsersOn = $current.accessType -eq 'allowed' -and
+              ($current.targets | Where-Object { $_.target -eq 'AllUsers' })
+
+if ($allUsersOn) {
+    Write-Host "Layer 2: M365 Collaboration trust is already on for all users. No change." -ForegroundColor Green
+} elseif ($current.accessType) {
+    # Someone has configured it differently (blocked, or scoped to specific users/groups).
+    # Don't widen it silently.
+    throw ("Layer 2: M365 Collaboration trust for this partner is already set to something other than " +
+           "'allowed for all users':`n" + ($current | ConvertTo-Json -Depth 6) +
+           "`nReview it with whoever configured it before changing it. This script won't overwrite it.")
+} else {
+    $body = @{
+        m365CollaborationInbound = @{
+            users = @{
+                accessType = "allowed"
+                targets    = @(@{ target = "AllUsers"; targetType = "user" })
+            }
+        }
+    } | ConvertTo-Json -Depth 6
+
+    if ($PSCmdlet.ShouldProcess("partner $PartnerTenantId", "Turn on M365 Collaboration trust for all users")) {
+        Invoke-RestMethod -Method Patch -Uri $graphBase -Headers $headers -Body $body @jsonParams | Out-Null
+        Write-Host "Layer 2: M365 Collaboration trust turned on." -ForegroundColor Green
+    }
+}
+
+# --- Layer 3: grant the capability ---------------------------------------------------------
+
+$odataType = "#microsoft.graph.$Capability"
+$existing  = (Invoke-RestMethod -Method Get -Uri "$graphBase/m365Capabilities" -Headers $headers).value |
+    Where-Object { $_.'@odata.type' -eq $odataType }
+
+if ($existing) {
+    Write-Host "Layer 3: $Capability is already configured for this partner. No change. Current setting:" -ForegroundColor Green
+    $existing | ConvertTo-Json -Depth 6 | Write-Host
+} else {
+    if ($ScopeGroupId) {
+        $target = @{ resourceId = "$ScopeGroupId"; resourceType = "group" }
+    } elseif ($Capability -like 'crossTenantCalendarSharing*') {
+        # Microsoft's guide uses resourceType "group" for all-users Calendar Sharing grants
+        $target = @{ resourceId = "All"; resourceType = "group" }
+    } else {
+        $target = @{ resourceId = "All"; resourceType = "user" }
+    }
+
+    $body = @{
+        "@odata.type" = $odataType
+        inboundAccess = @{
+            isAllowed      = $true
+            resourceScopes = @{
+                included = @($target)
+                excluded = @()
+            }
+        }
+    } | ConvertTo-Json -Depth 6
+
+    $who = if ($ScopeGroupId) { "members of group $ScopeGroupId" } else { "all users" }
+    if ($PSCmdlet.ShouldProcess("partner $PartnerTenantId", "Grant $Capability ($who)")) {
+        Invoke-RestMethod -Method Post -Uri "$graphBase/m365Capabilities" -Headers $headers -Body $body @jsonParams | Out-Null
+        Write-Host "Layer 3: granted $Capability to partner ($who)." -ForegroundColor Green
+    }
+}
+
+# --- Show the result -----------------------------------------------------------------------
+
+$partner = Invoke-RestMethod -Method Get -Uri $graphBase -Headers $headers
+$caps    = (Invoke-RestMethod -Method Get -Uri "$graphBase/m365Capabilities" -Headers $headers).value
+
+Write-Host "`nPartner $PartnerTenantId, as configured in tenant $TenantId" -ForegroundColor Cyan
+Write-Host "M365 Collaboration trust (Layer 2):"
+$partner.m365CollaborationInbound | ConvertTo-Json -Depth 6 | Write-Host
+Write-Host "Capabilities (Layer 3):"
+if ($caps) { $caps | ConvertTo-Json -Depth 6 | Write-Host } else { Write-Host "  (none)" }
+
+Write-Host "`nNext: the partner's admin runs this in their tenant with $TenantId as the partner, then test both directions (see the runbook's validation step)." -ForegroundColor Cyan

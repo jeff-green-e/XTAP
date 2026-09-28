@@ -72,6 +72,8 @@ Check these before running anything:
 - **Layer 1 is done in the portal**: each partner op-co should already appear under Entra ID → External Identities → Cross-tenant access settings → Organizational settings. Step 3 walks through verifying it (and adding it in the portal if missing). Layers 2/3 are configured against that same partner tenant ID.
 - **No domain federation involved: this is a deliberate change from EWS.** The old EWS-based Free/Busy setup relied on domain-based federation (Microsoft Federation Gateway), which sometimes required a partner's `*.onmicrosoft.com` default domain to be present in the trust chain even after mailboxes were fully online. XTAP has no equivalent: every partner relationship (Layer 1 B2B and Layer 2/3 M365 Collaboration) is keyed purely on the partner's **Entra Tenant ID (GUID)**; there's no `DomainNames` parameter anywhere in the XTAP object model. Don't chase down onmicrosoft.com domains for this migration; the Tenant ID is the only identifier needed per op-co.
 
+> **Shortcut:** [Enable-XtapPartner.ps1](Enable-XtapPartner.ps1) runs the sign-in plus the PowerShell parts of Steps 3 and 4 in one go, once per capability. You still verify Layer 1 in the portal first (Step 3). Try it first with `-WhatIf`. The manual steps below show what it does.
+
 How the sign-in works:
 
 - **You sign in with your own admin account: no app registration, certificate, or service principal.** This uses delegated auth via OAuth2 device-code flow against Microsoft's first-party "Microsoft Graph Command Line Tools" public client, which is pre-registered in every tenant, so there is nothing to create or configure ahead of time.
