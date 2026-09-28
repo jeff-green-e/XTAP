@@ -69,7 +69,7 @@ Check these before running anything:
 
 - **Role required**: Security Administrator or Global Administrator in each tenant (Cross-Tenant Access Policy is a sensitive Entra permission).
 - **Partner tenant IDs**: collect the Entra Tenant ID for every op-co that will be part of a sharing pair. Each op-co admin can find their own in Entra admin center → Overview → Tenant ID. Add these to the [pairings table](#per-pairing-tracking) before starting Layer 2/3 work, since every pairing needs the *other* tenant's ID.
-- **Confirm Layer 1 already exists**: each partner op-co should already appear as a configured organization under Entra ID → External Identities → Cross-tenant access settings → Organizational settings. Layers 2/3 are configured against that same partner tenant ID. No separate B2B setup is needed if it's already there; if a pairing is missing from that list entirely, it needs standard B2B org settings first.
+- **Layer 1 is done in the portal**: each partner op-co should already appear under Entra ID → External Identities → Cross-tenant access settings → Organizational settings. Step 3 walks through verifying it (and adding it in the portal if missing). Layers 2/3 are configured against that same partner tenant ID.
 - **No domain federation involved: this is a deliberate change from EWS.** The old EWS-based Free/Busy setup relied on domain-based federation (Microsoft Federation Gateway), which sometimes required a partner's `*.onmicrosoft.com` default domain to be present in the trust chain even after mailboxes were fully online. XTAP has no equivalent: every partner relationship (Layer 1 B2B and Layer 2/3 M365 Collaboration) is keyed purely on the partner's **Entra Tenant ID (GUID)**; there's no `DomainNames` parameter anywhere in the XTAP object model. Don't chase down onmicrosoft.com domains for this migration; the Tenant ID is the only identifier needed per op-co.
 
 How the sign-in works:
@@ -116,30 +116,38 @@ $headers = @{ Authorization = "Bearer $($token.access_token)" }
 
 The first time you run this in a tenant, you'll be asked to consent to two **delegated** permissions; accept them once per tenant. `Policy.ReadWrite.CrossTenantAccess` covers the partner trust settings (Step 3). `Policy.ReadWrite.CrossTenantCapability` covers the `m365Capabilities` grants (Step 4); without it, the Step 4 call is rejected even for a Global Administrator. Consent only approves this application acting with your existing admin role; it doesn't grant you any new rights.
 
-## Step 3: Enable M365 Collaboration trust (Layer 2)
+## Step 3: Verify Layer 1 in the portal, then enable M365 Collaboration trust (Layer 2)
 
-Run once per partner tenant, from the tenant you signed in to in Step 2. Turn on the inbound M365 Collaboration trust before granting any capability; capability grants in Step 4 do nothing without it. There's no portal UI for this step yet; it's a REST call against the partner's tenant ID:
+Run once per partner tenant, from the tenant you signed in to in Step 2.
+
+**Layer 1 (Entra admin center, no PowerShell).** Cross-tenant access settings are managed in the portal. For op-cos these entries almost always exist already, so this is a check:
+
+1. Go to **Entra admin center → Entra ID → External Identities → Cross-tenant access settings → Organizational settings** and find the partner by name or Tenant ID. If it's missing, select **Add organization** and enter the partner's Tenant ID; the new entry inherits your default settings.
+2. Open the partner's **Inbound access → Trust settings** and confirm it matches the environment standard: *Trust multifactor authentication from Microsoft Entra tenants* on; compliant and hybrid-joined device trust off. Fix it there if not.
+
+Trust settings govern B2B guest sign-ins, not calendar sharing, so they aren't a prerequisite for Free/Busy. Checking them now just confirms the entry you're building on is correct.
+
+**Layer 2 (PowerShell).** Turn on inbound M365 Collaboration trust before granting any capability; capability grants in Step 4 do nothing without it. There's no portal UI for this yet. This call only adds the M365 Collaboration setting and doesn't change the Layer 1 settings you just verified:
 
 ```powershell
 $partnerTenantId = "<partner-tenant-id>"  # the partner op-co this tenant is trusting; also used in Step 4
+$partnerUri      = "https://graph.microsoft.com/beta/policies/crossTenantAccessPolicy/partners/$partnerTenantId"
 
-# Enable M365 Collaboration inbound trust for a specific partner tenant
-# Only MFA is trusted in this scenario; device compliance and hybrid Entra join are
-# NOT accepted as substitutes, so both are explicitly false rather than omitted.
+# M365 Collaboration trust for all users. Narrower scoping is done per capability in Step 4.
 $body = @{
-    inboundTrust = @{
-        isMfaAccepted                       = $true
-        isCompliantDeviceAccepted           = $false
-        isHybridAzureADJoinedDeviceAccepted = $false
+    m365CollaborationInbound = @{
+        users = @{
+            accessType = "allowed"
+            targets    = @(@{ target = "AllUsers"; targetType = "user" })
+        }
     }
 } | ConvertTo-Json -Depth 6
 
-Invoke-RestMethod -Method Patch `
-    -Uri "https://graph.microsoft.com/beta/policies/crossTenantAccessPolicy/partners/$partnerTenantId" `
+Invoke-RestMethod -Method Patch -Uri $partnerUri `
     -Headers $headers -ContentType "application/json" -Body $body
 ```
 
-In testing, this call was enough for the Step 4 capability grant to succeed. The beta API is still changing, though, and Microsoft may add a dedicated `m365CollaborationInbound` property. Check the current syntax against the [Microsoft Learn migration guide](https://learn.microsoft.com/en-us/exchange/sharing/migrate-to-m365-xtap) before running this against a production tenant.
+If this returns 404, the partner entry doesn't exist; add the organization in the portal (above) and rerun. The `m365CollaborationInbound` property is taken from the [Microsoft Learn migration guide](https://learn.microsoft.com/en-us/exchange/sharing/migrate-to-m365-xtap); check it there before running against a production tenant, since the beta API is still changing.
 
 ## Step 4: Grant M365 capabilities (Layer 3)
 

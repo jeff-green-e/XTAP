@@ -12,7 +12,7 @@ Use this runbook when two tenants need to share Free/Busy, MailTips, or calendar
 
 If either tenant already has an Organization Relationship, Sharing Policy rule, or Availability Address Space for the other, use the [migration checklist](02-migration-checklist.md) instead. Old configuration takes precedence over XTAP, so a stray leftover entry will hide whether the new setup works.
 
-Net-new setup is simpler than migration: there's nothing to discover, nothing to run in parallel, and nothing to decommission. It's Layers 2 and 3 on each side, then a test.
+Net-new setup is simpler than migration: there's nothing to discover, nothing to run in parallel, and nothing to decommission. It's a check of the partner entry in the portal, Layers 2 and 3 in PowerShell on each side, then a test.
 
 ## Before you start
 
@@ -40,54 +40,58 @@ The Scheduling Assistant scenario ("add a colleague from the other op-co and see
 
 - **The rollout has reached both tenants.** XTAP for Free/Busy, MailTips, and Calendar Sharing is still rolling out; check Message Center (MC1446796).
 - **No leftover EWS-era config for this partner.** Run the Step 1 discovery commands from the [migration checklist](02-migration-checklist.md#step-1-discovery). If anything names the partner's domains, including a wildcard `*` Sharing Policy rule, handle it through the migration checklist first.
-- **Roles:** Global Administrator to create the M365 Collaboration trust (Step 2 below). Global Administrator or Exchange Administrator can grant capabilities (Step 3).
+- **Roles:** Global Administrator to create the M365 Collaboration trust (Step 3). Global Administrator or Exchange Administrator can grant capabilities (Step 4). Reviewing or adding the partner organization in the portal (Step 1) needs Security Administrator or Global Administrator.
 - **Scoping group (optional):** if only some of your users should be visible to the partner, create a security group of those users now and note its object ID.
 
-## Step 1: Sign in
+## Step 1: Verify the partner organization in Entra admin center (Layer 1)
 
-Use the device-code sign-in from the [migration checklist, Step 2](02-migration-checklist.md#step-2-prerequisites-and-sign-in). Set `$tenantId` to *your* tenant and sign in as a Global Administrator. The consent prompt asks for `Policy.ReadWrite.CrossTenantAccess` and `Policy.ReadWrite.CrossTenantCapability`; accept both. You'll reuse `$headers` in the steps below.
+Layer 1 is configured in the portal, not with PowerShell. In most cases the partner is already there and you only need to check it.
 
-## Step 2: Create the partner entry and M365 Collaboration trust (Layers 1 and 2)
+1. Go to **Entra admin center → Entra ID → External Identities → Cross-tenant access settings → Organizational settings**.
+2. Look for the partner in the list, by name or Tenant ID.
+   - **Listed**: go to step 3.
+   - **Not listed**: select **Add organization**, enter the partner's Tenant ID, and select **Add**. The new entry inherits your default settings; don't change anything else here unless your B2B standards call for it.
+3. Open the partner's **Inbound access** and check the **Trust settings** tab against your environment's standard: *Trust multifactor authentication from Microsoft Entra tenants* is on; compliant and hybrid-joined device trust are off. Fix it here if it doesn't match.
 
-This creates the partner entry if it doesn't exist yet, then turns on M365 Collaboration trust for all users. If the partner already has a Layer 1 B2B entry, this only adds the M365 Collaboration setting to it. A newly created entry inherits your tenant's default B2B settings, so it doesn't open up B2B access beyond what your defaults already allow.
+Trust settings govern B2B guest sign-ins. Calendar sharing doesn't depend on them, so a mismatch won't break Free/Busy, but this is the natural moment to confirm the entry is correct.
+
+## Step 2: Sign in
+
+Layers 2 and 3 have no portal UI yet, so the rest of the setup uses PowerShell. Use the device-code sign-in from the [migration checklist, Step 2](02-migration-checklist.md#step-2-prerequisites-and-sign-in). Set `$tenantId` to *your* tenant and sign in as a Global Administrator. The consent prompt asks for `Policy.ReadWrite.CrossTenantAccess` and `Policy.ReadWrite.CrossTenantCapability`; accept both. You'll reuse `$headers` in the steps below.
+
+## Step 3: Turn on M365 Collaboration trust (Layer 2)
+
+This adds M365 Collaboration trust for all users to the partner entry you verified in Step 1. It doesn't change any Layer 1 settings.
 
 ```powershell
-$partnerTenantId = "<partner-tenant-id>"  # the partner you're granting access to; also used in Step 3
-$partnersUri     = "https://graph.microsoft.com/beta/policies/crossTenantAccessPolicy/partners"
+$partnerTenantId = "<partner-tenant-id>"  # the partner you're granting access to; also used in Step 4
+$partnerUri      = "https://graph.microsoft.com/beta/policies/crossTenantAccessPolicy/partners/$partnerTenantId"
 
-# M365 Collaboration trust for all users. Narrower scoping is done per capability in Step 3.
-$trust = @{
+# Stop if the partner entry doesn't exist yet
+try {
+    Invoke-RestMethod -Method Get -Uri $partnerUri -Headers $headers | Out-Null
+} catch {
+    if ([int]$_.Exception.Response.StatusCode -eq 404) {
+        throw "No partner entry for $partnerTenantId. Add the organization in Entra admin center first (Step 1)."
+    }
+    throw
+}
+
+# M365 Collaboration trust for all users. Narrower scoping is done per capability in Step 4.
+$body = @{
     m365CollaborationInbound = @{
         users = @{
             accessType = "allowed"
             targets    = @(@{ target = "AllUsers"; targetType = "user" })
         }
     }
-}
+} | ConvertTo-Json -Depth 6
 
-# Is there already a partner entry (Layer 1) for this tenant?
-$existing = $null
-try {
-    $existing = Invoke-RestMethod -Method Get -Uri "$partnersUri/$partnerTenantId" -Headers $headers
-} catch {
-    if ([int]$_.Exception.Response.StatusCode -ne 404) { throw }
-}
-
-if ($existing) {
-    # Add M365 Collaboration trust to the existing entry
-    Invoke-RestMethod -Method Patch -Uri "$partnersUri/$partnerTenantId" `
-        -Headers $headers -ContentType "application/json" -Body ($trust | ConvertTo-Json -Depth 6)
-} else {
-    # Create the partner entry with M365 Collaboration trust
-    $trust.tenantId = $partnerTenantId
-    Invoke-RestMethod -Method Post -Uri $partnersUri `
-        -Headers $headers -ContentType "application/json" -Body ($trust | ConvertTo-Json -Depth 6)
-}
+Invoke-RestMethod -Method Patch -Uri $partnerUri `
+    -Headers $headers -ContentType "application/json" -Body $body
 ```
 
-MFA and device trust settings (`inboundTrust`) are Layer 1 B2B settings and aren't needed for calendar sharing. Leave them as your B2B policy already has them.
-
-## Step 3: Grant capabilities (Layer 3)
+## Step 4: Grant capabilities (Layer 3)
 
 Run once per capability you agreed to share. Each call grants the partner's users inbound access to that capability in your tenant.
 
@@ -122,9 +126,9 @@ $uri = "https://graph.microsoft.com/beta/policies/crossTenantAccessPolicy/partne
 (Invoke-RestMethod -Method Get -Uri "$uri/m365Capabilities" -Headers $headers).value | ConvertTo-Json -Depth 6
 ```
 
-## Step 4: The partner configures their side
+## Step 5: The partner configures their side
 
-Your configuration only lets the partner see *your* users. For your users to see theirs, the partner's admin runs Steps 1 to 3 in *their* tenant, with *your* Tenant ID as `$partnerTenantId`.
+Your configuration only lets the partner see *your* users. For your users to see theirs, the partner's admin runs Steps 1 to 4 in *their* tenant, with *your* Tenant ID as `$partnerTenantId`.
 
 Send them:
 
@@ -133,7 +137,7 @@ Send them:
 - What you'd like them to grant you.
 - A link to this doc, or the [Microsoft Learn guide](https://learn.microsoft.com/en-us/exchange/sharing/migrate-to-m365-xtap) if they're outside the organization (its Part 2 covers the same calls).
 
-## Step 5: Validate
+## Step 6: Validate
 
 Test in both directions once both sides are done. With no old configuration in the way, results reflect XTAP alone.
 
@@ -147,7 +151,7 @@ Test in both directions once both sides are done. With no old configuration in t
 
 ## Changing or removing sharing later
 
-- **Change the level**: grant the new capability (Step 3), confirm it works, then remove the old one.
+- **Change the level**: grant the new capability (Step 4), confirm it works, then remove the old one.
 - **Stop sharing with a partner** (for example after a divestiture): remove the capabilities from the partner entry, then remove its M365 Collaboration trust. Your users stay hidden from the partner as soon as the capabilities are gone, whatever the partner has configured on their side. See the [M365 cross-tenant access policy Graph API overview](https://learn.microsoft.com/en-us/graph/api/resources/m365-cross-tenant-access-policy-overview) for the update and delete calls.
 
 ## Tenant-wide defaults (use with care)
@@ -158,10 +162,10 @@ Anonymous calendar publishing (sharing a calendar to an internet URL) can only b
 
 ## Per-partner tracking
 
-| Partner | Partner tenant ID | We grant them | They grant us | Our Layer 2 | Our Layer 3 | Their side done | Validated both ways |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-|  |  |  |  | ☐ | ☐ | ☐ | ☐ |
-|  |  |  |  | ☐ | ☐ | ☐ | ☐ |
+| Partner | Partner tenant ID | We grant them | They grant us | Layer 1 verified | Our Layer 2 | Our Layer 3 | Their side done | Validated both ways |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+|  |  |  |  | ☐ | ☐ | ☐ | ☐ | ☐ |
+|  |  |  |  | ☐ | ☐ | ☐ | ☐ | ☐ |
 
 ## References
 
