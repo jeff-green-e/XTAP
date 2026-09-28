@@ -10,7 +10,7 @@ Microsoft is retiring Exchange Web Services (EWS) in Exchange Online: soft block
 | --- | --- | --- |
 | 1. Entra Cross-Tenant Access Policy | B2B trust: MFA/device trust, invitation redemption, cross-tenant sync | Entra admin center → External Identities → Cross-tenant access settings (the existing grid, not where Free/Busy lives) |
 | 2. M365 Collaboration trust | A per-partner inbound trust flag (`m365CollaborationInbound`) that must be on before Layer 3 does anything | Microsoft Graph (beta); no portal UI yet |
-| 3. M365 capabilities | The actual grants: Free/Busy (basic/detail), MailTips, Calendar Sharing (simple/detail/reviewer), plus anonymous variants | Microsoft Graph (beta); no portal UI yet |
+| 3. M365 capabilities | The actual grants: Free/Busy (basic/limited details), MailTips (limited/all), Calendar Sharing (simple/detail/reviewer), plus anonymous variants | Microsoft Graph (beta); no portal UI yet |
 
 **What "inbound" means in this checklist.** Every XTAP setting is configured on one tenant and names one partner tenant. *Inbound* means requests from the partner's users coming *into* the tenant you're configuring. Granting an inbound capability lets the partner's users see this tenant's data. So on Op-Co A's tenant, an inbound Free/Busy grant for Op-Co B lets B's users see A's free/busy.
 
@@ -41,7 +41,7 @@ Then the discovery commands:
 
 ```powershell
 # Organization Relationships (Free/Busy, MailTips)
-Get-OrganizationRelationship | Format-List Name, DomainNames, Enabled, FreeBusyAccessEnabled, FreeBusyAccessLevel, FreeBusyAccessScope, MailTipsAccessEnabled, MailTipsAccessLevel, MailTipsAccessScope
+Get-OrganizationRelationship | Format-List Name, DomainNames, Enabled, FreeBusyAccessEnabled, FreeBusyAccessLevel, FreeBusyAccessScope, MailTipsAccessEnabled, MailTipsAccessLevel, MailTipsAccessScope, TargetSharingEpr, TargetAutodiscoverEpr
 
 # Sharing Policies (calendar sharing, incl. anonymous publishing)
 Get-SharingPolicy | Format-List Name, Domains, Enabled, Default
@@ -49,15 +49,15 @@ Get-SharingPolicy | Format-List Name, Domains, Enabled, Default
 # Which mailboxes use which Sharing Policy (a blank name means the Default policy)
 Get-Mailbox -ResultSize Unlimited | Group-Object SharingPolicy | Select-Object Count, Name
 
-# Availability Address Spaces (legacy free/busy trust, often cross-forest/hybrid-adjacent)
-Get-AvailabilityAddressSpace | Format-List
+# Availability Address Spaces (org-wide free/busy trust)
+Get-AvailabilityAddressSpace | Format-List ForestName, AccessMethod, TargetAutodiscoverEpr, TargetServiceEpr, TargetTenantId
 ```
 
 A partner relationship is in scope for this migration if the partner org is hosted in Microsoft 365 and **any** of the following is true:
 
-- **Organization Relationship**: `Enabled: True` with `FreeBusyAccessEnabled: True` and/or `MailTipsAccessEnabled: True` for the partner's domains.
+- **Organization Relationship**: `Enabled: True` with `FreeBusyAccessEnabled: True` and/or `MailTipsAccessEnabled: True` for the partner's domains. A `TargetSharingEpr` or `TargetAutodiscoverEpr` containing outlook.com, office365.com, or office365.us confirms the partner is in Microsoft 365. If the same relationship is also used for something else (for example cross-tenant mailbox migration), move that to a separate Organization Relationship before cutover.
 - **Sharing Policy**: `Enabled: True`, a `Domains` rule for the partner's domain with a `CalendarSharingFreeBusy` access level (Simple, Detail, or Reviewer), and the policy is assigned to one or more mailboxes (per the `Get-Mailbox` grouping above).
-- **Availability Address Space**: an entry whose `ForestName` is the partner's domain.
+- **Availability Address Space** (optional to migrate): an entry whose `ForestName` is the partner's domain and whose `AccessMethod` is `OrgWideFBToken`. These don't use EWS, so they keep working after the shutdown; migrate them to get XTAP's scoping and security features. Entries with any other `AccessMethod` can't be migrated to XTAP.
 
 `Anonymous:`-prefixed Sharing Policy rules are calendar publishing to the public internet, not tenant-to-tenant sharing; call those out separately.
 
@@ -67,7 +67,11 @@ Record, per op-co: which partner op-cos it currently shares with, through which 
 
 Check these before running anything:
 
-- **Role required**: Security Administrator or Global Administrator in each tenant (Cross-Tenant Access Policy is a sensitive Entra permission).
+- **Roles required** in each tenant:
+  - **Global Administrator** to turn on M365 Collaboration trust (Step 3, Layer 2). Microsoft's guide doesn't list any lesser role for this.
+  - Security Administrator or Global Administrator to review or add the partner in the portal (Step 3, Layer 1).
+  - Global Administrator or Exchange Administrator to grant capabilities (Step 4).
+  - Organization Management in Exchange Online to turn off and remove old configuration (Steps 5 and 6).
 - **Partner tenant IDs**: collect the Entra Tenant ID for every op-co that will be part of a sharing pair. Each op-co admin can find their own in Entra admin center → Overview → Tenant ID. Add these to the [pairings table](#per-pairing-tracking) before starting Layer 2/3 work, since every pairing needs the *other* tenant's ID.
 - **Layer 1 is done in the portal**: each partner op-co should already appear under Entra ID → External Identities → Cross-tenant access settings → Organizational settings. Step 3 walks through verifying it (and adding it in the portal if missing). Layers 2/3 are configured against that same partner tenant ID.
 - **No domain federation involved: this is a deliberate change from EWS.** The old EWS-based Free/Busy setup relied on domain-based federation (Microsoft Federation Gateway), which sometimes required a partner's `*.onmicrosoft.com` default domain to be present in the trust chain even after mailboxes were fully online. XTAP has no equivalent: every partner relationship (Layer 1 B2B and Layer 2/3 M365 Collaboration) is keyed purely on the partner's **Entra Tenant ID (GUID)**; there's no `DomainNames` parameter anywhere in the XTAP object model. Don't chase down onmicrosoft.com domains for this migration; the Tenant ID is the only identifier needed per op-co.
@@ -155,15 +159,26 @@ If this returns 404, the partner entry doesn't exist; add the organization in th
 
 Once Layer 2 trust is on for a partner, grant the capabilities that partner's users should have **inbound**, meaning what they may see of *this* tenant. Uses the same `$partnerTenantId` as Step 3. Example, Free/Busy only:
 
+Pick the capability that matches what Step 1 found. Names are case-sensitive.
+
+| Old setting (from Step 1) | Capability |
+| --- | --- |
+| Organization Relationship `FreeBusyAccessLevel AvailabilityOnly`, or an `OrgWideFBToken` Availability Address Space | `crossTenantCalendarAvailabilityBasic` |
+| Organization Relationship `FreeBusyAccessLevel LimitedDetails` | `crossTenantCalendarAvailabilityLimitedDetails` |
+| Organization Relationship `MailTipsAccessLevel Limited` | `crossTenantMailTipsLimited` |
+| Organization Relationship `MailTipsAccessLevel All` | `crossTenantMailTipsAll` |
+| Sharing Policy `CalendarSharingFreeBusySimple` | `crossTenantCalendarSharingFreeBusySimple` |
+| Sharing Policy `CalendarSharingFreeBusyDetail` | `crossTenantCalendarSharingFreeBusyDetail` |
+| Sharing Policy `CalendarSharingFreeBusyReviewer` | `crossTenantCalendarSharingFreeBusyReviewer` |
+
+If the old Organization Relationship used `FreeBusyAccessScope` or `MailTipsAccessScope` (a group), scope the capability to that group by putting `@{ resourceId = "<group-object-id>"; resourceType = "group" }` in `included`. If different mailboxes were on different Sharing Policies, you'll need a security group per level to reproduce that.
+
 ```powershell
 # Grant an inbound M365 capability to a specific partner tenant
-# Example: availability-only free/busy (crossTenantCalendarAvailabilityBasic)
-# Other capability values: crossTenantCalendarAvailabilityDetail (time+subject+location),
-#   crossTenantMailTipsBasic / crossTenantMailTipsDetail,
-#   crossTenantCalendarSharingFreeBusySimple / ...Detail / ...Reviewer
+$capability = "crossTenantCalendarAvailabilityBasic"  # from the table above
 
 $body = @{
-    "@odata.type"  = "microsoft.graph.crossTenantCalendarAvailabilityBasic"
+    "@odata.type"  = "#microsoft.graph.$capability"
     inboundAccess  = @{
         isAllowed      = $true
         resourceScopes = @{
@@ -178,42 +193,68 @@ Invoke-RestMethod -Method Post `
     -Headers $headers -ContentType "application/json" -Body $body
 ```
 
-**Both sides must run this.** The call only affects the tenant it's run against. For Op-Co A and Op-Co B to see each other's free/busy, run it on A's tenant with B as the partner, and on B's tenant with A as the partner. Match the capability level (`Basic`/`Detail`, `Simple`/`Detail`/`Reviewer`) to what Step 1's discovery showed was in use, unless the business wants to change the sharing level as part of this migration.
+**Both sides must run this.** The call only affects the tenant it's run against. For Op-Co A and Op-Co B to see each other's free/busy, run it on A's tenant with B as the partner, and on B's tenant with A as the partner. Match the capability level to what Step 1's discovery showed was in use, unless the business wants to change the sharing level as part of this migration. For Calendar Sharing grants to all users, Microsoft's guide uses `resourceType = "group"` with `resourceId = "All"`; [Enable-XtapPartner.ps1](Enable-XtapPartner.ps1) handles this for you.
 
-## Step 5: Validation
+## Step 5: Cut over and validate
 
-Before touching the old EWS-based config, confirm the new path actually works:
+**Old configuration takes precedence over XTAP.** While an Organization Relationship, Sharing Policy rule, or Availability Address Space for the partner is still active, Outlook uses it, so testing with both in place proves nothing about the new path. Cut over one pairing at a time: turn the old configuration off on **both** tenants, then test right away. Agree a time with the partner's admin so both sides switch together, since users lose cross-tenant free/busy between the switch and a successful test (or a rollback).
 
-- **Free/Busy**: in Outlook (desktop or OWA), have a user in Op-Co A create a meeting and add a user from Op-Co B as an attendee. Scheduling Assistant should show B's availability at the level B's tenant granted (free/busy only, or with subject/location if Detail was granted). Then repeat in the other direction.
-- **MailTips**: if MailTips capability was granted, check that out-of-office / automatic-reply MailTips surface correctly when addressing a user in the partner org.
-- **Calendar Sharing** (if granted beyond free/busy): have a user share their calendar with a specific partner-org user and confirm the recipient can open it.
-- **Timing**: changes aren't always instant. If a test fails right after the Graph grant, wait and retry before troubleshooting, and note how long it took so later pairings have a realistic expectation.
-- **Cross-check against Step 1's baseline**: confirm the new path matches or exceeds what the old configuration provided, so nothing regresses for end users during cutover.
-
-Don't disable the old configuration until this validation passes for a given pairing; keep both live in parallel during testing.
-
-## Step 6: Decommission old EWS-based config
-
-Once validation passes for a given pairing and both sides are confirmed on the new path, remove the old config for that partner on each tenant. Save the Step 1 discovery output first so you can restore anything you remove.
+**1. Back up and turn off the old configuration, on both tenants:**
 
 ```powershell
-# Organization Relationship: disable (don't delete right away; keep for rollback)
+# Organization Relationship: disable (keep it for rollback)
 Set-OrganizationRelationship -Identity "<PartnerOrgRelationship>" -Enabled $false
 
 # Sharing Policy: remove only the partner's domain rule, NOT the whole policy.
-# Disabling the policy would also break every other sharing rule for the mailboxes
-# assigned to it (including all mailboxes on the Default policy).
-# Copy the exact rule string from Get-SharingPolicy's Domains output.
+# Copy the exact rule string from Get-SharingPolicy's Domains output, and keep it for rollback.
 Set-SharingPolicy -Identity "<SharingPolicyName>" -Domains @{Remove = "<partner-domain>:<AccessLevel>"}
 
-# Availability Address Space: there is no disable switch, so removal is the only option.
-# Keep the Step 1 Get-AvailabilityAddressSpace output so it can be recreated if needed.
-Remove-AvailabilityAddressSpace -Identity "<partner-domain>"
+# Availability Address Space (only if migrating it): there's no disable switch, so back it up, then remove it.
+Get-AvailabilityAddressSpace "<partner-domain>" | Export-CliXML ".\AvailabilityAddressSpaceBackup_<partner-domain>.xml"
+Remove-AvailabilityAddressSpace "<partner-domain>"
 ```
 
-- Disable rather than remove Organization Relationships initially; remove them outright only after a burn-in period (e.g., 2 to 4 weeks) with no reported issues.
-- Do this per pairing as each is validated; don't wait to decommission everything at once, since EWS itself starts being blocked October 1, 2026 regardless.
-- Track decommission status per pairing in the tables below so nothing gets missed before the hard EWS cutoff.
+Microsoft's guide disables the whole Sharing Policy (`Set-SharingPolicy -Enabled $false`). This checklist removes just the partner's rule instead, because disabling a policy also breaks every other sharing rule for the mailboxes assigned to it, which includes every mailbox on the Default policy. Disable the whole policy only if it contains nothing but this partner's rule.
+
+**2. Test, in both directions:**
+
+- **Free/Busy**: in Outlook (desktop or web), have a user in Op-Co A create a meeting and add a user from Op-Co B as an attendee. Scheduling Assistant should show B's availability at the level B's tenant granted (times only, or with subject/location if Limited Details was granted). Then repeat from B to A.
+- **MailTips** (if granted): address a partner user who has automatic replies on; the MailTip should appear before sending.
+- **Calendar Sharing** (if granted): have a user share their calendar with a partner user and confirm the recipient can open it at the granted level.
+- **Group scoping** (if used): confirm a user outside the group shows no availability to the partner.
+- **Timing**: changes aren't always instant. If a test fails right after cutover, wait and retry before rolling back, and note how long it took so later pairings have a realistic expectation.
+- **Compare with Step 1's baseline**: the new path should match or exceed what the old configuration provided.
+
+**3. If it doesn't work, roll back** on the tenant that isn't showing data (the tenant being looked *at*), then troubleshoot before trying again:
+
+```powershell
+Set-OrganizationRelationship -Identity "<PartnerOrgRelationship>" -Enabled $true
+Set-SharingPolicy -Identity "<SharingPolicyName>" -Domains @{Add = "<partner-domain>:<AccessLevel>"}
+
+# Restore an Availability Address Space from its backup
+Import-Clixml ".\AvailabilityAddressSpaceBackup_<partner-domain>.xml" | ForEach-Object {
+    $p = @{ ForestName = $_.ForestName; AccessMethod = $_.AccessMethod }
+    foreach ($n in 'ProxyUrl', 'TargetAutodiscoverEpr', 'TargetServiceEpr', 'TargetTenantId') {
+        if (-not [string]::IsNullOrEmpty($_.$n)) { $p[$n] = $_.$n }
+    }
+    Add-AvailabilityAddressSpace @p
+}
+```
+
+Do this per pairing as each is ready; don't wait to cut over everything at once, since EWS starts being blocked October 1, 2026 regardless.
+
+## Step 6: Clean up old configuration
+
+After a burn-in period with no reported issues (e.g., 2 to 4 weeks), remove what you turned off:
+
+```powershell
+Remove-OrganizationRelationship -Identity "<PartnerOrgRelationship>"
+
+# Only if the policy is now unused (no rules left that anyone needs, and no mailboxes assigned)
+Remove-SharingPolicy -Identity "<SharingPolicyName>"
+```
+
+Keep the Availability Address Space backup files until the burn-in is over, then delete them. Track cleanup per pairing in the tables below so nothing is left behind before the April 1, 2027 hard cutoff.
 
 ## Per-pairing tracking
 
@@ -228,10 +269,10 @@ Add one row per op-co pairing identified in Step 1's discovery, using the same p
 
 **Status:** "On A" means configured on A's tenant with B as the partner, which lets B's users see A's data (and vice versa for "On B").
 
-| # | Layer 2 on A | Layer 2 on B | Layer 3 on A | Layer 3 on B | Validated | Old config decommissioned |
-| --- | --- | --- | --- | --- | --- | --- |
-| 1 | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ |
-| 2 | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ |
+| # | Layer 1 verified (A and B) | Layer 2 on A | Layer 2 on B | Layer 3 on A | Layer 3 on B | Old config off (both) | Validated | Old config removed |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ |
+| 2 | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ |
 
 ## Key dates and references
 

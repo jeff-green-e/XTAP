@@ -12,7 +12,7 @@ Use this runbook when two tenants need to share Free/Busy, MailTips, or calendar
 
 If either tenant already has an Organization Relationship, Sharing Policy rule, or Availability Address Space for the other, use the [migration checklist](02-migration-checklist.md) instead. Old configuration takes precedence over XTAP, so a stray leftover entry will hide whether the new setup works.
 
-Net-new setup is simpler than migration: there's nothing to discover, nothing to run in parallel, and nothing to decommission. It's a check of the partner entry in the portal, Layers 2 and 3 in PowerShell on each side, then a test.
+Net-new setup is simpler than migration: there's nothing to discover, no old configuration to turn off, and nothing to clean up. It's a check of the partner entry in the portal, Layers 2 and 3 in PowerShell on each side, then a test.
 
 ## Before you start
 

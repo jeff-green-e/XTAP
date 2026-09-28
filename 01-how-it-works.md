@@ -65,7 +65,7 @@ Exact capability identifiers are in the Microsoft Learn migration guide's table;
 - **"We need their onmicrosoft.com domain."** Not anymore. Nothing in the new model is domain-based; the Tenant ID is the only identifier.
 - **"Configuring our side turns on sharing both ways."** It only controls what the partner can read from you. The partner has to configure their side for you to see them.
 - **"This touches Exchange hybrid."** It doesn't. Hybrid and on-premises free/busy follow separate guidance; this covers tenant-to-tenant sharing in Exchange Online.
-- **"Once EWS is blocked, the old settings are harmless."** They stop working, but leaving them around invites confusion during troubleshooting. Disable after validation, remove after a burn-in.
+- **"Once EWS is blocked, the old settings are harmless."** They stop working, but while they're still active they take precedence over XTAP, so they hide whether the new setup works. Disable them to test the new path, and remove them after a burn-in.
 
 ## References
 
