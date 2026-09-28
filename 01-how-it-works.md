@@ -1,6 +1,6 @@
 # Cross-Tenant Calendar Sharing: How It Works
 
-Read this first. It explains what's moving, why, and where each setting lives. When you're ready to do the work, the [migration checklist](02-migration-checklist.md) is the runbook.
+Read this first. It explains what's moving, why, and where each setting lives. When you're ready to do the work, the [migration checklist](02-migration-checklist.md) is the runbook for moving existing sharing off EWS, and [new partner setup](03-new-partner-setup.md) covers sharing with a tenant you've never shared with before.
 
 ## The short version
 
