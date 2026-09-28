@@ -48,6 +48,10 @@
         -Capability crossTenantCalendarAvailabilityBasic, crossTenantMailTipsAll
 
 .EXAMPLE
+    # Also print the raw Graph responses at the end, for troubleshooting
+    .\Enable-XtapPartner.ps1 -TenantId <id> -PartnerTenantId <id> -Verbose
+
+.EXAMPLE
     # Show what would change without changing anything
     .\Enable-XtapPartner.ps1 -TenantId <id> -PartnerTenantId <id> `
         -Capability crossTenantMailTipsAll -WhatIf
@@ -86,6 +90,15 @@ $jsonParams = @{ ContentType = "application/json" }
 
 function Get-GraphErrorCode($errorRecord) {
     try { return ($errorRecord.ErrorDetails.Message | ConvertFrom-Json).error } catch { return $null }
+}
+
+function Format-Capability($c) {
+    # One line per capability, e.g. "crossTenantCalendarAvailabilityBasic: allowed for all users"
+    $name = $c.'@odata.type' -replace '^#?microsoft\.graph\.', ''
+    if (-not $c.inboundAccess.isAllowed) { return "${name}: present but not allowed" }
+    $who = @($c.inboundAccess.resourceScopes.included | Where-Object { $_.resourceId }) |
+        ForEach-Object { if ($_.resourceId -eq 'All') { "all users" } else { "$($_.resourceType) $($_.resourceId)" } }
+    return "${name}: allowed for $(if ($who) { $who -join ', ' } else { 'nobody' })"
 }
 
 # --- Sign in (device-code flow) ------------------------------------------------------------
@@ -180,8 +193,7 @@ foreach ($cap in $Capability | Select-Object -Unique) {
     $existing  = $existingCaps | Where-Object { $_.'@odata.type' -eq $odataType }
 
     if ($existing) {
-        Write-Host "Layer 3: $cap is already configured for this partner. No change. Current setting:" -ForegroundColor Green
-        $existing | ConvertTo-Json -Depth 6 | Write-Host
+        Write-Host "Layer 3: already configured, no change ($(Format-Capability $existing))." -ForegroundColor Green
         continue
     }
 
@@ -210,10 +222,21 @@ foreach ($cap in $Capability | Select-Object -Unique) {
 $partner = Invoke-RestMethod -Method Get -Uri $graphBase -Headers $headers
 $caps    = (Invoke-RestMethod -Method Get -Uri "$graphBase/m365Capabilities" -Headers $headers).value
 
+$collab = $partner.m365CollaborationInbound.users
+$collabText = if ($collab.accessType) {
+    "$($collab.accessType) for $(@($collab.targets | ForEach-Object { if ($_.target -eq 'AllUsers') { 'all users' } else { $_.target } }) -join ', ')"
+} else { "not set on this partner (inherits the default policy)" }
+
 Write-Host "`nPartner $PartnerTenantId, as configured in tenant $TenantId" -ForegroundColor Cyan
-Write-Host "M365 Collaboration trust (Layer 2):"
-$partner.m365CollaborationInbound | ConvertTo-Json -Depth 6 | Write-Host
-Write-Host "Capabilities (Layer 3):"
-if ($caps) { $caps | ConvertTo-Json -Depth 6 | Write-Host } else { Write-Host "  (none)" }
+Write-Host "  M365 Collaboration trust: $collabText"
+if ($caps) {
+    foreach ($c in $caps) { Write-Host "  Capability: $(Format-Capability $c)" }
+} else {
+    Write-Host "  Capabilities: none"
+}
+
+# Raw Graph responses, for troubleshooting: run with -Verbose
+Write-Verbose ("m365CollaborationInbound:`n" + ($partner.m365CollaborationInbound | ConvertTo-Json -Depth 6))
+Write-Verbose ("m365Capabilities:`n" + ($caps | ConvertTo-Json -Depth 6))
 
 Write-Host "`nNext: the partner's admin runs this in their tenant with $TenantId as the partner, then test both directions (see the runbook's validation step)." -ForegroundColor Cyan
