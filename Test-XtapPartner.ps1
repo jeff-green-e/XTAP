@@ -53,9 +53,9 @@
     .\Test-XtapPartner.ps1 -TenantId <your-tenant-id>
 
 .EXAMPLE
-    # One partner, and fail if Free/Busy basic isn't granted
+    # One partner, and fail if Free/Busy basic or all MailTips isn't granted
     .\Test-XtapPartner.ps1 -TenantId <your-tenant-id> -PartnerTenantId <partner-tenant-id> `
-        -ExpectedCapability crossTenantCalendarAvailabilityBasic -CsvPath .\xtap-check.csv
+        -ExpectedCapability crossTenantCalendarAvailabilityBasic, crossTenantMailTipsAll -CsvPath .\xtap-check.csv
 
 .OUTPUTS
     With -PassThru, one object per check: PartnerTenantId, PartnerName, Check, Status (PASS/WARN/FAIL/INFO), Detail.

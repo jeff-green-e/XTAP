@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Turns on M365 Collaboration trust (Layer 2) and grants one M365 capability (Layer 3)
+    Turns on M365 Collaboration trust (Layer 2) and grants M365 capabilities (Layer 3)
     to a partner tenant, so the partner's users can see this tenant's Free/Busy, MailTips,
     or shared calendars.
 
@@ -22,7 +22,8 @@
 
     Signs in with device-code flow as you (Global Administrator), using Microsoft's
     first-party Graph Command Line Tools client. No app registration or secret.
-    Run once per capability; re-running is safe (existing settings are left alone).
+    Re-running is safe: settings that already exist are left alone, so you can run it
+    again later to add another capability.
 
 .PARAMETER TenantId
     Your tenant: the one whose data the partner will be allowed to see.
@@ -31,11 +32,18 @@
     The partner tenant being granted access.
 
 .PARAMETER Capability
-    The capability to grant. Names come from the Microsoft Learn migration guide and are case-sensitive.
+    One or more capabilities to grant. Default: crossTenantCalendarAvailabilityBasic
+    (free/busy times only, the Scheduling Assistant case). Names come from the Microsoft
+    Learn migration guide and are case-sensitive.
 
 .EXAMPLE
+    # Free/busy times only (the default)
+    .\Enable-XtapPartner.ps1 -TenantId <your-tenant-id> -PartnerTenantId <partner-tenant-id>
+
+.EXAMPLE
+    # Free/busy and all MailTips, in one sign-in
     .\Enable-XtapPartner.ps1 -TenantId <your-tenant-id> -PartnerTenantId <partner-tenant-id> `
-        -Capability crossTenantCalendarAvailabilityBasic
+        -Capability crossTenantCalendarAvailabilityBasic, crossTenantMailTipsAll
 
 .EXAMPLE
     # Show what would change without changing anything
@@ -53,7 +61,6 @@ param(
     [Parameter(Mandatory)]
     [guid] $PartnerTenantId,
 
-    [Parameter(Mandatory)]
     [ValidateSet(
         'crossTenantCalendarAvailabilityBasic',
         'crossTenantCalendarAvailabilityLimitedDetails',
@@ -63,7 +70,7 @@ param(
         'crossTenantCalendarSharingFreeBusyDetail',
         'crossTenantCalendarSharingFreeBusyReviewer'
     )]
-    [string] $Capability
+    [string[]] $Capability = 'crossTenantCalendarAvailabilityBasic'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -162,34 +169,37 @@ if ($allUsersOn) {
     }
 }
 
-# --- Layer 3: grant the capability ---------------------------------------------------------
+# --- Layer 3: grant the capabilities -------------------------------------------------------
 
-$odataType = "#microsoft.graph.$Capability"
-$existing  = (Invoke-RestMethod -Method Get -Uri "$graphBase/m365Capabilities" -Headers $headers).value |
-    Where-Object { $_.'@odata.type' -eq $odataType }
+$existingCaps = (Invoke-RestMethod -Method Get -Uri "$graphBase/m365Capabilities" -Headers $headers).value
 
-if ($existing) {
-    Write-Host "Layer 3: $Capability is already configured for this partner. No change. Current setting:" -ForegroundColor Green
-    $existing | ConvertTo-Json -Depth 6 | Write-Host
-} else {
+foreach ($cap in $Capability | Select-Object -Unique) {
+    $odataType = "#microsoft.graph.$cap"
+    $existing  = $existingCaps | Where-Object { $_.'@odata.type' -eq $odataType }
+
+    if ($existing) {
+        Write-Host "Layer 3: $cap is already configured for this partner. No change. Current setting:" -ForegroundColor Green
+        $existing | ConvertTo-Json -Depth 6 | Write-Host
+        continue
+    }
+
     # All users. Microsoft's guide uses resourceType "group" for Calendar Sharing, "user" for the rest.
-    $resourceType = if ($Capability -like 'crossTenantCalendarSharing*') { "group" } else { "user" }
-    $target = @{ resourceId = "All"; resourceType = $resourceType }
+    $resourceType = if ($cap -like 'crossTenantCalendarSharing*') { "group" } else { "user" }
 
     $body = @{
         "@odata.type" = $odataType
         inboundAccess = @{
             isAllowed      = $true
             resourceScopes = @{
-                included = @($target)
+                included = @(@{ resourceId = "All"; resourceType = $resourceType })
                 excluded = @()
             }
         }
     } | ConvertTo-Json -Depth 6
 
-    if ($PSCmdlet.ShouldProcess("partner $PartnerTenantId", "Grant $Capability (all users)")) {
+    if ($PSCmdlet.ShouldProcess("partner $PartnerTenantId", "Grant $cap (all users)")) {
         Invoke-RestMethod -Method Post -Uri "$graphBase/m365Capabilities" -Headers $headers -Body $body @jsonParams | Out-Null
-        Write-Host "Layer 3: granted $Capability to partner (all users)." -ForegroundColor Green
+        Write-Host "Layer 3: granted $cap to partner (all users)." -ForegroundColor Green
     }
 }
 
