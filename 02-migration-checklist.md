@@ -97,11 +97,16 @@ $deviceCodeResponse = Invoke-RestMethod -Method Post `
 
 Write-Host $deviceCodeResponse.message
 # "To sign in, use a web browser to open https://microsoft.com/devicelogin
-#  and enter the code XXXXXXXXX." Do that now, signing in as an account
-#  with Global Administrator or Security Administrator in this tenant.
+#  and enter the code XXXXXXXXX." Do that now, signing in as a
+#  Global Administrator of this tenant.
 
-do {
-    Start-Sleep -Seconds $deviceCodeResponse.interval
+$interval = [int]$deviceCodeResponse.interval
+$deadline = (Get-Date).AddSeconds([int]$deviceCodeResponse.expires_in)
+$token    = $null
+
+while (-not $token) {
+    if ((Get-Date) -gt $deadline) { throw "The sign-in code expired. Run this block again." }
+    Start-Sleep -Seconds $interval
     try {
         $token = Invoke-RestMethod -Method Post `
             -Uri "https://login.microsoftonline.com/$tenantId/oauth2/v2.0/token" `
@@ -110,11 +115,16 @@ do {
                 client_id   = $clientId
                 device_code = $deviceCodeResponse.device_code
             }
-        break
     } catch {
-        # authorization_pending: keep polling until you finish signing in
+        $err  = $_
+        $code = try { ($err.ErrorDetails.Message | ConvertFrom-Json).error } catch { $null }
+        switch ($code) {
+            'authorization_pending' { }                  # not signed in yet; keep waiting
+            'slow_down'             { $interval += 5 }   # server asked us to poll less often
+            default                 { throw $err }       # declined, expired, wrong tenant, etc.
+        }
     }
-} while ($true)
+}
 
 $headers = @{ Authorization = "Bearer $($token.access_token)" }
 # Reuse $headers on every call in Steps 3 and 4
@@ -133,7 +143,9 @@ Run once per partner tenant, from the tenant you signed in to in Step 2.
 
 Trust settings govern B2B guest sign-ins, not calendar sharing, so they aren't a prerequisite for Free/Busy. Checking them now just confirms the entry you're building on is correct.
 
-**Layer 2 (PowerShell).** Turn on inbound M365 Collaboration trust before granting any capability; capability grants in Step 4 do nothing without it. There's no portal UI for this yet. This call only adds the M365 Collaboration setting and doesn't change the Layer 1 settings you just verified:
+**Layer 2 (PowerShell).** Turn on inbound M365 Collaboration trust before granting any capability; capability grants in Step 4 do nothing without it. There's no portal UI for this yet. This call only adds the M365 Collaboration setting and doesn't change the Layer 1 settings you just verified.
+
+**Before running it**, check that M365 Collaboration trust isn't already set for this partner. This PATCH replaces whatever is there, so a setting someone limited to specific users, or blocked, would silently become "all users". [Test-XtapPartner.ps1](Test-XtapPartner.ps1) shows the current value, and [Enable-XtapPartner.ps1](Enable-XtapPartner.ps1) refuses to overwrite it. If it's already set to anything other than all users, review it with whoever configured it first.
 
 ```powershell
 $partnerTenantId = "<partner-tenant-id>"  # the partner op-co this tenant is trusting; also used in Step 4
@@ -157,7 +169,7 @@ If this returns 404, the partner entry doesn't exist; add the organization in th
 
 ## Step 4: Grant M365 capabilities (Layer 3)
 
-Once Layer 2 trust is on for a partner, grant the capabilities that partner's users should have **inbound**, meaning what they may see of *this* tenant. Uses the same `$partnerTenantId` as Step 3. Example, Free/Busy only:
+Once Layer 2 trust is on for a partner, grant the capabilities that partner's users should have **inbound**, meaning what they may see of *this* tenant. Uses the same `$partnerTenantId` as Step 3.
 
 Pick the capability that matches what Step 1 found. Names are case-sensitive.
 
@@ -182,6 +194,7 @@ $body = @{
     inboundAccess  = @{
         isAllowed      = $true
         resourceScopes = @{
+            # All users. For Calendar Sharing capabilities use resourceType = "group" instead.
             included = @(@{ resourceId = "All"; resourceType = "user" })
             excluded = @()
         }
@@ -193,7 +206,7 @@ Invoke-RestMethod -Method Post `
     -Headers $headers -ContentType "application/json" -Body $body
 ```
 
-**Both sides must run this.** The call only affects the tenant it's run against. For Op-Co A and Op-Co B to see each other's free/busy, run it on A's tenant with B as the partner, and on B's tenant with A as the partner. Match the capability level to what Step 1's discovery showed was in use, unless the business wants to change the sharing level as part of this migration. For Calendar Sharing grants to all users, Microsoft's guide uses `resourceType = "group"` with `resourceId = "All"`; [Enable-XtapPartner.ps1](Enable-XtapPartner.ps1) handles this for you.
+**Both sides must run this.** The call only affects the tenant it's run against. For Op-Co A and Op-Co B to see each other's free/busy, run it on A's tenant with B as the partner, and on B's tenant with A as the partner. Match the capability level to what Step 1's discovery showed was in use, unless the business wants to change the sharing level as part of this migration. [Enable-XtapPartner.ps1](Enable-XtapPartner.ps1) picks the right `resourceType` for Calendar Sharing automatically.
 
 ## Step 5: Cut over and validate
 

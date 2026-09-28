@@ -65,6 +65,8 @@ Layers 2 and 3 have no portal UI yet, so the rest of the setup uses PowerShell. 
 
 This adds M365 Collaboration trust for all users to the partner entry you verified in Step 1. It doesn't change any Layer 1 settings.
 
+**Before running it**, check that M365 Collaboration trust isn't already set for this partner. This PATCH replaces whatever is there, so a setting someone limited to specific users, or blocked, would silently become "all users". [Test-XtapPartner.ps1](Test-XtapPartner.ps1) shows the current value, and [Enable-XtapPartner.ps1](Enable-XtapPartner.ps1) refuses to overwrite it. If it's already set to anything other than all users, review it with whoever configured it first.
+
 ```powershell
 $partnerTenantId = "<partner-tenant-id>"  # the partner you're granting access to; also used in Step 4
 $partnerUri      = "https://graph.microsoft.com/beta/policies/crossTenantAccessPolicy/partners/$partnerTenantId"

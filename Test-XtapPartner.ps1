@@ -20,6 +20,9 @@
     Availability Address Spaces) and doesn't prove Free/Busy works for users. Use the Outlook
     tests in the runbook for that (02 Step 5 / 03 Step 6).
 
+    The sign-in block is shared with Enable-XtapPartner.ps1 and the 02 runbook; keep
+    them in step.
+
     Signs in with device-code flow as you, using Microsoft's first-party Graph Command Line
     Tools client. Global Reader or Security Reader is enough.
 

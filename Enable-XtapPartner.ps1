@@ -9,6 +9,8 @@
       - 02-migration-checklist.md, Steps 2 to 4 (moving existing sharing off EWS)
       - 03-new-partner-setup.md,  Steps 2 to 4 (sharing with a new partner)
     Follow the runbook; this script doesn't replace it.
+    The manual PowerShell snippets in 02 and 03 mirror this script. If you change the
+    Graph calls, sign-in, or safety checks here, update those snippets too.
 
     What it does NOT do:
       - Create or change the partner's cross-tenant access settings (Layer 1), including
