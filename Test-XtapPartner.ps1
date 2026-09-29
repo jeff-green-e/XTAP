@@ -210,7 +210,7 @@ if ($PartnerTenantId) {
         if ((Get-StatusCode $_) -ne 404) { throw }
         $partners = @()
         Add-Result $PartnerTenantId (Get-TenantName $PartnerTenantId) "Partner entry" "FAIL" `
-            "Not found. Add the organization in Entra admin center > External Identities > Cross-tenant access settings > Organizational settings."
+            "Not found. Add the organization in Entra admin center > Identity > External Identities > Cross-tenant access settings > Organizational settings."
     }
 } else {
     $partners = @(Invoke-GraphGetAll "$policyBase/partners")

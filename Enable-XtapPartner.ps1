@@ -148,7 +148,7 @@ try {
 } catch {
     if ([int]$_.Exception.Response.StatusCode -eq 404) {
         throw ("No cross-tenant access entry for partner $PartnerTenantId. Add the organization in " +
-               "Entra admin center > External Identities > Cross-tenant access settings > " +
+               "Entra admin center > Identity > External Identities > Cross-tenant access settings > " +
                "Organizational settings, verify its trust settings, then run this again.")
     }
     throw

@@ -10,7 +10,7 @@ Microsoft is retiring Exchange Web Services (EWS) in Exchange Online: soft block
 
 | Layer | What it controls | Where it's configured |
 | --- | --- | --- |
-| 1. Entra Cross-Tenant Access Policy | B2B trust: MFA/device trust, invitation redemption, cross-tenant sync | Entra admin center → External Identities → Cross-tenant access settings (the existing grid, not where Free/Busy lives) |
+| 1. Entra Cross-Tenant Access Policy | B2B trust: MFA/device trust, invitation redemption, cross-tenant sync | Entra admin center → Identity → External Identities → Cross-tenant access settings (the existing grid, not where Free/Busy lives) |
 | 2. M365 Collaboration trust | A per-partner inbound trust flag (`m365CollaborationInbound`) that must be on before Layer 3 does anything | Microsoft Graph (beta); no portal UI yet |
 | 3. M365 capabilities | The actual grants: Free/Busy (basic/limited details), MailTips (limited/all), Calendar Sharing (simple/detail/reviewer), plus anonymous variants | Microsoft Graph (beta); no portal UI yet |
 
@@ -74,8 +74,8 @@ Check these before running anything:
   - Security Administrator or Global Administrator to review or add the partner in the portal (Step 3, Layer 1).
   - Global Administrator or Exchange Administrator to grant capabilities (Step 4).
   - Organization Management in Exchange Online to turn off and remove old configuration (Steps 5 and 6).
-- **Partner tenant IDs**: collect the Entra Tenant ID for every op-co that will be part of a sharing pair. Each op-co admin can find their own in Entra admin center → Overview → Tenant ID. Add these to the [pairings table](#per-pairing-tracking) before starting Layer 2/3 work, since every pairing needs the *other* tenant's ID.
-- **Layer 1 is done in the portal**: each partner op-co should already appear under Entra ID → External Identities → Cross-tenant access settings → Organizational settings. Step 3 walks through verifying it (and adding it in the portal if missing). Layers 2/3 are configured against that same partner tenant ID.
+- **Partner tenant IDs**: collect the Entra Tenant ID for every op-co that will be part of a sharing pair. Each op-co admin can find their own in Entra admin center → Identity → Overview → Tenant ID. Add these to the [pairings table](#per-pairing-tracking) before starting Layer 2/3 work, since every pairing needs the *other* tenant's ID.
+- **Layer 1 is done in the portal**: each partner op-co should already appear under Entra admin center → Identity → External Identities → Cross-tenant access settings → Organizational settings. Step 3 walks through verifying it (and adding it in the portal if missing). Layers 2/3 are configured against that same partner tenant ID.
 - **No domain federation involved: this is a deliberate change from EWS.** The old EWS-based Free/Busy setup relied on domain-based federation (Microsoft Federation Gateway), which sometimes required a partner's `*.onmicrosoft.com` default domain to be present in the trust chain even after mailboxes were fully online. XTAP has no equivalent: every partner relationship (Layer 1 B2B and Layer 2/3 M365 Collaboration) is keyed purely on the partner's **Entra Tenant ID (GUID)**; there's no `DomainNames` parameter anywhere in the XTAP object model. Don't chase down onmicrosoft.com domains for this migration; the Tenant ID is the only identifier needed per op-co.
 
 **Choose how to do the PowerShell work in Steps 2 to 4:**
@@ -143,7 +143,7 @@ Run once per partner tenant, from the tenant you signed in to in Step 2.
 
 **Layer 1 (Entra admin center, no PowerShell).** Cross-tenant access settings are managed in the portal. For op-cos these entries almost always exist already, so this is a check:
 
-1. Go to **Entra admin center → Entra ID → External Identities → Cross-tenant access settings → Organizational settings** and find the partner by name or Tenant ID. If it's missing, select **Add organization** and enter the partner's Tenant ID; the new entry inherits your default settings.
+1. Go to **Entra admin center → Identity → External Identities → Cross-tenant access settings → Organizational settings** and find the partner by name or Tenant ID. If it's missing, select **Add organization** and enter the partner's Tenant ID; the new entry inherits your default settings.
 2. Open the partner's **Inbound access → Trust settings** and confirm it matches the environment standard: *Trust multifactor authentication from Microsoft Entra tenants* on; compliant and hybrid-joined device trust off. Fix it there if not.
 
 Trust settings govern B2B guest sign-ins, not calendar sharing, so they aren't a prerequisite for Free/Busy. Checking them now just confirms the entry you're building on is correct.

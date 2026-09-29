@@ -32,7 +32,7 @@ The Scheduling Assistant scenario ("add a colleague from the other op-co and see
 
 **Collect from the partner:**
 
-- Their Entra **Tenant ID** (Entra admin center → Overview → Tenant ID). Domain names aren't needed.
+- Their Entra **Tenant ID** (Entra admin center → Identity → Overview → Tenant ID). Domain names aren't needed.
 - The name of an admin who will configure their side and test with you.
 - Confirmation that they're hosted in Exchange Online. XTAP doesn't cover on-premises or hybrid free/busy.
 
@@ -47,7 +47,7 @@ The Scheduling Assistant scenario ("add a colleague from the other op-co and see
 
 Layer 1 is configured in the portal, not with PowerShell. In most cases the partner is already there and you only need to check it.
 
-1. Go to **Entra admin center → Entra ID → External Identities → Cross-tenant access settings → Organizational settings**.
+1. Go to **Entra admin center → Identity → External Identities → Cross-tenant access settings → Organizational settings**.
 2. Look for the partner in the list, by name or Tenant ID.
    - **Listed**: go to step 3.
    - **Not listed**: select **Add organization**, enter the partner's Tenant ID, and select **Add**. The new entry inherits your default settings; don't change anything else here unless your B2B standards call for it.

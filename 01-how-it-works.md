@@ -67,7 +67,7 @@ Exact capability identifiers are in the Microsoft Learn migration guide's table;
 
 | Piece | Where you work with it | Notes |
 | --- | --- | --- |
-| Layer 1: Entra B2B partner entry | Entra admin center → External Identities → Cross-tenant access settings | Existing grid; only MFA is trusted inbound in this environment |
+| Layer 1: Entra B2B partner entry | Entra admin center → Identity → External Identities → Cross-tenant access settings | Existing grid; only MFA is trusted inbound in this environment |
 | Layer 2: M365 Collaboration trust | Microsoft Graph (beta) | No portal UI yet |
 | Layer 3: M365 capabilities | Microsoft Graph (beta) | No portal UI yet |
 | Old Organization Relationships / Sharing Policies | Exchange Online PowerShell | Used for discovery, then disabled and removed |
