@@ -37,13 +37,9 @@ Scheduling Assistant only needs the first one, the script's default. Grant the o
 - **Roles:** Step 1: Security Administrator or Global Administrator. Step 2: **Global Administrator**. Step 3: Global Administrator, or Global Reader once an admin has approved the tool.
 - **Only some users visible to the partner?** The script always grants to all users; use the [manual steps](#appendix-manual-powershell-steps) with a security group.
 
-## Step 1: Verify the partner organization in Entra admin center (Layer 1)
+## Step 1: Confirm the partner organization exists in Entra admin center (Layer 1)
 
-The partner is usually already there, so this is a check.
-
-1. Go to **Entra admin center → Identity → External Identities → Cross-tenant access settings → Organizational settings**.
-2. Find the partner. If it's missing, select **Add organization**, enter its Tenant ID, and select **Add**.
-3. Open the partner's **Inbound access → Trust settings** and confirm the standard: MFA trusted; compliant and hybrid-joined device trust off. Fix it there if not. (Trust settings affect B2B sign-ins, not calendar sharing.)
+Go to **Entra admin center → Identity → External Identities → Cross-tenant access settings → Organizational settings** and find the partner. It's usually already there. If it's missing, select **Add organization**, enter its Tenant ID, and select **Add**. Don't change its trust settings (MFA, device trust); they apply to B2B guest sign-ins, not calendar sharing.
 
 ## Step 2: Turn on sharing with Enable-XtapPartner.ps1 (Layers 2 and 3)
 
@@ -116,7 +112,7 @@ Partner <partner-tenant-id>, as configured in tenant <your-tenant-id>
 | --- | --- | --- |
 | `… is not digitally signed. You cannot run this script on the current system.` | The downloaded script is still blocked. | [Unblock it](#unblock-the-downloaded-scripts) and run it again. |
 | `… cannot be loaded because running scripts is disabled on this system.` | The execution policy blocks scripts. | Run `Set-ExecutionPolicy -Scope Process Bypass`, then run it again. |
-| `No cross-tenant access entry for partner …` | The partner isn't under Organizational settings. | Add it in the portal ([Step 1](#step-1-verify-the-partner-organization-in-entra-admin-center-layer-1)), then run the script again. |
+| `No cross-tenant access entry for partner …` | The partner isn't under Organizational settings. | Add it in the portal ([Step 1](#step-1-confirm-the-partner-organization-exists-in-entra-admin-center-layer-1)), then run the script again. |
 | `Layer 2: … already set to something other than 'allowed for all users'` | Someone limited or blocked the trust. The script won't widen it. | Check with whoever set it before changing anything. |
 | **Need admin approval** during sign-in | The account can't approve the tool's permissions itself. | Sign in as a Global Administrator. |
 | `403` / `Authorization_RequestDenied` | Not a Global Administrator, or consent was declined. | Sign in as a Global Administrator and accept the prompt. |
@@ -137,7 +133,6 @@ Run the read-only check with the capabilities you granted:
 | Check | Expected | If not |
 | --- | --- | --- |
 | Partner entry | PASS | Add the partner in the portal (Step 1), then rerun the enable script (Step 2). |
-| Trust settings | PASS | WARN means the portal settings don't match the standard. Fix them in the portal (Step 1). This doesn't block calendar sharing. |
 | M365 Collab trust | PASS: "Allowed for all users." | "Not configured" or "inherited from default": rerun the enable script and answer **Y** to the M365 Collaboration trust prompt. Limited or blocked on this partner: the script won't change it; review it with whoever set it. |
 | Expected capability | PASS for each one listed | Rerun the enable script with the missing capability in `-Capability`. |
 | Capability | INFO lines listing what's granted | Nothing to do; this is for reference. |

@@ -13,9 +13,8 @@
     Graph calls, sign-in, or safety checks here, update those snippets too.
 
     What it does NOT do:
-      - Create or change the partner's cross-tenant access settings (Layer 1), including
-        trust settings. Those are verified or added in the Entra admin center first
-        (02 Step 3 / 03 Step 1). If the partner entry doesn't exist, the script stops.
+      - Create or change the partner's cross-tenant access entry (Layer 1). Add it in the
+        Entra admin center first (02 Step 3 / 03 Step 1); if it's missing, the script stops.
       - Configure the partner's side. Sharing is inbound only: running this in tenant A
         lets B's users see A. B's admin runs it in B, with A as the partner.
       - Disable old EWS-era configuration (see 02).
@@ -154,7 +153,7 @@ try {
     if ([int]$_.Exception.Response.StatusCode -eq 404) {
         throw ("No cross-tenant access entry for partner $PartnerTenantId. Add the organization in " +
                "Entra admin center > Identity > External Identities > Cross-tenant access settings > " +
-               "Organizational settings, verify its trust settings, then run this again.")
+               "Organizational settings, then run this again.")
     }
     throw
 }

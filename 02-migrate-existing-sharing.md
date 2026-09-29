@@ -81,12 +81,11 @@ Windows blocks scripts downloaded through a browser. A blocked script fails with
 
 Files from `git clone` don't need unblocking.
 
-## Step 3: Verify the partner organization in Entra admin center (Layer 1)
+## Step 3: Confirm the partner organization exists in Entra admin center (Layer 1)
 
-Run once per partner. For op-cos this entry almost always exists, so it's a check:
+Run once per partner. For op-cos this entry almost always exists already.
 
-1. Go to **Entra admin center → Identity → External Identities → Cross-tenant access settings → Organizational settings** and find the partner. If it's missing, select **Add organization** and enter its Tenant ID.
-2. Open the partner's **Inbound access → Trust settings** and confirm the standard: MFA trusted; compliant and hybrid-joined device trust off. Fix it there if not. (Trust settings affect B2B sign-ins, not calendar sharing.)
+Go to **Entra admin center → Identity → External Identities → Cross-tenant access settings → Organizational settings** and find the partner. If it's missing, select **Add organization** and enter its Tenant ID. Don't change its trust settings (MFA, device trust); they apply to B2B guest sign-ins, not calendar sharing.
 
 ## Step 4: Turn on sharing with Enable-XtapPartner.ps1 (Layers 2 and 3)
 
@@ -163,7 +162,6 @@ Each admin can only check their own tenant, so each checks their side and you co
 | Check | Expected | If not |
 | --- | --- | --- |
 | Partner entry | PASS | Add the partner in the portal (Step 3), then rerun the enable script. |
-| Trust settings | PASS | WARN means the portal settings don't match the standard. Fix them in the portal (Step 3). This doesn't block calendar sharing. |
 | M365 Collab trust | PASS: "Allowed for all users." | "Not configured" or "inherited from default": rerun the enable script and answer **Y** to the M365 Collaboration trust prompt. Limited or blocked on this partner: the script won't change it; review it with whoever set it. |
 | Expected capability | PASS for each one listed | Rerun the enable script with the missing capability in `-Capability`. |
 | Capability | INFO lines listing what's granted | Nothing to do; this is for reference. |

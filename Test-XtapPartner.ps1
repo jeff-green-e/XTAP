@@ -5,8 +5,6 @@
 .DESCRIPTION
     Reports, per partner, what THIS tenant grants that partner's users:
       - Partner entry     : the partner exists under Cross-tenant access settings (Layer 1)
-      - Trust settings    : inbound MFA / compliant device / hybrid join trust matches the
-                            environment standard. Informational: calendar sharing doesn't depend on it.
       - M365 Collab trust : m365CollaborationInbound allows the partner's users (Layer 2)
       - Capabilities      : which M365 capabilities are granted, and to whom (Layer 3)
     With no -PartnerTenantId it also reports capabilities on the tenant-wide default policy,
@@ -37,15 +35,6 @@
 .PARAMETER ExpectedCapability
     Capabilities this partner should have. Any that are missing are reported as FAIL.
     Only meaningful with -PartnerTenantId.
-
-.PARAMETER ExpectMfaTrust
-    Expected value of "Trust multifactor authentication". Default: $true (environment standard).
-
-.PARAMETER ExpectCompliantDeviceTrust
-    Expected value of "Trust compliant devices". Default: $false.
-
-.PARAMETER ExpectHybridJoinTrust
-    Expected value of "Trust Microsoft Entra hybrid joined devices". Default: $false.
 
 .PARAMETER CsvPath
     Also write the results to this CSV file (e.g. to attach to a change ticket).
@@ -85,10 +74,6 @@ param(
         'crossTenantCalendarSharingFreeBusyReviewer'
     )]
     [string[]] $ExpectedCapability,
-
-    [bool] $ExpectMfaTrust = $true,
-    [bool] $ExpectCompliantDeviceTrust = $false,
-    [bool] $ExpectHybridJoinTrust = $false,
 
     [string] $CsvPath,
 
@@ -228,31 +213,6 @@ foreach ($p in $partners) {
     $name = Get-TenantName $id
 
     Add-Result $id $name "Partner entry" "PASS" "Exists."
-
-    # Layer 1 trust (informational for calendar sharing). Null on the partner = inherits default.
-    $trust  = $p.inboundTrust
-    $source = "partner setting"
-    if (-not $trust) { $trust = $default.inboundTrust; $source = "inherited from default" }
-
-    $actual   = [ordered]@{
-        MFA              = [bool]$trust.isMfaAccepted
-        CompliantDevice  = [bool]$trust.isCompliantDeviceAccepted
-        HybridJoin       = [bool]$trust.isHybridAzureADJoinedDeviceAccepted
-    }
-    $expected = [ordered]@{
-        MFA              = $ExpectMfaTrust
-        CompliantDevice  = $ExpectCompliantDeviceTrust
-        HybridJoin       = $ExpectHybridJoinTrust
-    }
-    $diffs = $actual.Keys | Where-Object { $actual[$_] -ne $expected[$_] } |
-        ForEach-Object { "$_ is $($actual[$_]), expected $($expected[$_])" }
-    $summary = ($actual.Keys | ForEach-Object { "$_=$($actual[$_])" }) -join ", "
-
-    if ($diffs) {
-        Add-Result $id $name "Trust settings" "WARN" "$($diffs -join '; ') ($source). Fix in the portal if it should match the standard. Doesn't affect calendar sharing."
-    } else {
-        Add-Result $id $name "Trust settings" "PASS" "$summary ($source)."
-    }
 
     # Layer 2: M365 Collaboration trust
     $collab = $p.m365CollaborationInbound.users
