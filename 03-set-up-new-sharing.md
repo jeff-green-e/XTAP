@@ -40,7 +40,7 @@ The Scheduling Assistant scenario ("add a colleague from the other op-co and see
 
 - **The rollout has reached both tenants.** XTAP for Free/Busy, MailTips, and Calendar Sharing is still rolling out; check Message Center (MC1446796).
 - **No leftover EWS-era config for this partner.** Run the Step 1 discovery commands from [Migrate Existing Sharing](02-migrate-existing-sharing.md#step-1-discovery). If anything names the partner's domains, including a wildcard `*` Sharing Policy rule, switch to that runbook.
-- **Roles:** Security Administrator or Global Administrator for the portal check (Step 1). **Global Administrator** to run the enable script (Step 2), because it turns on M365 Collaboration trust. Global Reader is enough for the configuration check (Step 3).
+- **Roles:** Security Administrator or Global Administrator for the portal check (Step 1). **Global Administrator** to run the enable script (Step 2), because it turns on M365 Collaboration trust. The configuration check (Step 3) can be run by the same Global Administrator, or by a Global Reader once an admin has approved the tool's read permissions.
 - **Scoping group (optional):** if only some of your users should be visible to the partner, create a security group of those users now and note its object ID. The script always grants to all users, so a group-limited grant uses the [manual steps](#appendix-manual-powershell-steps) instead.
 
 ## Step 1: Verify the partner organization in Entra admin center (Layer 1)
@@ -93,7 +93,13 @@ Run it with `-WhatIf` first. It signs in and reads the current settings, but cha
 ```
 
 1. The script prints a URL and a code. Open the URL in a browser, enter the code, and sign in as a Global Administrator of **your** tenant.
-2. The first time in a tenant, you're asked to consent to `Policy.ReadWrite.CrossTenantAccess` and `Policy.ReadWrite.CrossTenantCapability` for Microsoft Graph Command Line Tools. Accept. This only lets the tool act with the admin rights you already have.
+2. The first time in a tenant, Microsoft shows a **Permissions requested** prompt for Microsoft Graph Command Line Tools (published by Microsoft Corporation):
+
+   ![Permissions requested prompt for Microsoft Graph Command Line Tools, listing cross tenant access policies, M365 cross tenant access capabilities, basic profile, and maintain access, with the "Consent on behalf of your organization" checkbox unticked](images/05-consent-prompt.png)
+
+   - The first two lines are the permissions the script needs: *cross tenant access policies* (`Policy.ReadWrite.CrossTenantAccess`) and *M365 cross tenant access capabilities* (`Policy.ReadWrite.CrossTenantCapability`). *View your basic profile* and *Maintain access to data you have given it access to* are standard sign-in permissions that Microsoft adds.
+   - **Leave "Consent on behalf of your organization" unticked.** Ticking it approves the tool for everyone in the tenant, which the script doesn't need.
+   - Select **Accept**. This only lets the tool act with the admin rights you already have, and you won't be asked again in this tenant.
 3. Back in PowerShell, check the "What if" lines. For a new partner you should see one for turning on M365 Collaboration trust and one for each capability:
 
 ```text
@@ -138,6 +144,7 @@ Partner <partner-tenant-id>, as configured in tenant <your-tenant-id>
 | `… cannot be loaded because running scripts is disabled on this system.` | The PowerShell execution policy doesn't allow scripts. | Run `Set-ExecutionPolicy -Scope Process Bypass` (this window only) and run it again. |
 | `No cross-tenant access entry for partner …` | The partner isn't under Organizational settings. | Add it in the portal ([Step 1](#step-1-verify-the-partner-organization-in-entra-admin-center-layer-1)), then run the script again. |
 | `Layer 2: M365 Collaboration trust for this partner is already set to something other than 'allowed for all users'` | Someone has limited or blocked the trust for this partner. The script won't widen it. | Find out who set it and why before changing anything. The message shows the current setting. |
+| **Need admin approval** in the browser during sign-in | The account can't approve the tool's permissions for itself (usually a non-admin running the check script). | Sign in as a Global Administrator, or have one approve the permissions first. |
 | `403` / `Authorization_RequestDenied` | The account isn't a Global Administrator, or the consent prompt was declined. | Sign in with a Global Administrator account and accept the consent prompt. |
 | `The sign-in code expired` | Sign-in wasn't finished in time (about 15 minutes). | Run the script again. |
 | An `AADSTS…` error during sign-in | Usually the wrong `-TenantId`, or signing in with an account from a different tenant. | Check the tenant ID, and sign in with an account from that tenant. |
@@ -152,7 +159,7 @@ Run the read-only check against the same partner, listing the capabilities you g
     -ExpectedCapability crossTenantCalendarAvailabilityBasic
 ```
 
-It signs in the same way (Global Reader is enough) and should show **PASS** for Partner entry, Trust settings, M365 Collab trust, and each expected capability. A WARN on Trust settings means Step 1 doesn't match the environment standard; fix it in the portal. It doesn't block calendar sharing. Fix any FAIL before moving on. Add `-CsvPath .\xtap-check.csv` to keep a copy for the change record.
+It signs in the same way. It asks for read-only permissions (`Policy.Read.All`, plus `CrossTenantInformation.ReadBasic.All` to show partner names), so its consent prompt looks different; leave "Consent on behalf of your organization" unticked here too. A Global Administrator can run it straight away. A Global Reader can run it only after an administrator has approved these permissions for the tool, because read access to policies needs admin consent; if a Global Reader gets **Need admin approval**, have the Global Administrator run the check instead. It should show **PASS** for Partner entry, Trust settings, M365 Collab trust, and each expected capability. A WARN on Trust settings means Step 1 doesn't match the environment standard; fix it in the portal. It doesn't block calendar sharing. Fix any FAIL before moving on. Add `-CsvPath .\xtap-check.csv` to keep a copy for the change record.
 
 ## Step 4: The partner configures their side
 

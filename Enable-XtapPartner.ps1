@@ -111,7 +111,7 @@ $deviceCode = Invoke-RestMethod -Method Post `
     -Body @{ client_id = $clientId; scope = $scope }
 
 Write-Host $deviceCode.message -ForegroundColor Yellow
-Write-Host "Sign in as a Global Administrator of tenant $TenantId." -ForegroundColor Yellow
+Write-Host "Sign in as a Global Administrator of tenant $TenantId. Leave 'Consent on behalf of your organization' unticked." -ForegroundColor Yellow
 
 $interval = [int]$deviceCode.interval
 $deadline = (Get-Date).AddSeconds([int]$deviceCode.expires_in)

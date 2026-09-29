@@ -24,7 +24,9 @@
     them in step.
 
     Signs in with device-code flow as you, using Microsoft's first-party Graph Command Line
-    Tools client. Global Reader or Security Reader is enough.
+    Tools client. A Global Administrator can run it directly. Global Reader or Security
+    Reader works once an admin has approved its read permissions (Policy.Read.All needs
+    admin consent); otherwise sign-in shows "Need admin approval".
 
 .PARAMETER TenantId
     The tenant to check.
@@ -122,7 +124,7 @@ $deviceCode = Invoke-RestMethod -Method Post `
     -Body @{ client_id = $clientId; scope = $scope }
 
 Write-Host $deviceCode.message -ForegroundColor Yellow
-Write-Host "Sign in with an account that can read policies in tenant $TenantId (Global Reader is enough)." -ForegroundColor Yellow
+Write-Host "Sign in with an account that can read policies in tenant $TenantId. Leave 'Consent on behalf of your organization' unticked." -ForegroundColor Yellow
 
 $interval = [int]$deviceCode.interval
 $deadline = (Get-Date).AddSeconds([int]$deviceCode.expires_in)

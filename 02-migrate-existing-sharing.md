@@ -72,7 +72,7 @@ Check these before changing anything:
 - **Roles required** in each tenant:
   - Security Administrator or Global Administrator for the portal check (Step 3).
   - **Global Administrator** to run the enable script (Step 4), because it turns on M365 Collaboration trust. Microsoft's guide doesn't list any lesser role for that.
-  - Global Reader or higher for the configuration check (Step 5).
+  - Global Administrator, or Global Reader once an admin has approved the tool's read permissions, for the configuration check (Step 5).
   - Organization Management in Exchange Online to turn off and remove old configuration (Steps 6 and 7).
 - **Partner tenant IDs**: collect the Entra Tenant ID for every op-co that will be part of a sharing pair. Each op-co admin can find their own in Entra admin center → Identity → Overview → Tenant ID. Add these to the [pairings table](#per-pairing-tracking) before starting, since every pairing needs the *other* tenant's ID.
 - **The scripts**: download [Enable-XtapPartner.ps1](Enable-XtapPartner.ps1) and [Test-XtapPartner.ps1](Test-XtapPartner.ps1) from this repo into one folder. Downloaded scripts are usually blocked; [unblock them](#unblock-the-downloaded-scripts) before running. Use PowerShell 7 (Windows PowerShell 5.1 should also work) in a normal window opened in that folder; no modules to install. If the execution policy stops a script, `Set-ExecutionPolicy -Scope Process Bypass` allows it for that window only.
@@ -133,7 +133,13 @@ Run with `-WhatIf` first. It signs in and reads the current settings, but change
 ```
 
 1. The script prints a URL and a code. Open the URL in a browser, enter the code, and sign in as a Global Administrator of **this** tenant (the one you're configuring).
-2. The first time in a tenant, you're asked to consent to `Policy.ReadWrite.CrossTenantAccess` and `Policy.ReadWrite.CrossTenantCapability` for Microsoft Graph Command Line Tools. Accept. This only lets the tool act with the admin rights you already have.
+2. The first time in a tenant, Microsoft shows a **Permissions requested** prompt for Microsoft Graph Command Line Tools (published by Microsoft Corporation):
+
+   ![Permissions requested prompt for Microsoft Graph Command Line Tools, listing cross tenant access policies, M365 cross tenant access capabilities, basic profile, and maintain access, with the "Consent on behalf of your organization" checkbox unticked](images/05-consent-prompt.png)
+
+   - The first two lines are the permissions the script needs: *cross tenant access policies* (`Policy.ReadWrite.CrossTenantAccess`) and *M365 cross tenant access capabilities* (`Policy.ReadWrite.CrossTenantCapability`). *View your basic profile* and *Maintain access to data you have given it access to* are standard sign-in permissions that Microsoft adds.
+   - **Leave "Consent on behalf of your organization" unticked.** Ticking it approves the tool for everyone in the tenant, which the script doesn't need.
+   - Select **Accept**. This only lets the tool act with the admin rights you already have, and you won't be asked again in this tenant.
 3. Check the "What if" lines: one for turning on M365 Collaboration trust (unless it's already on) and one for each capability not yet granted.
 
 ### Run it
@@ -173,7 +179,7 @@ Before cutting over, each admin runs the read-only check in their own tenant, wi
     -ExpectedCapability crossTenantCalendarAvailabilityBasic -CsvPath .\xtap-check.csv
 ```
 
-It signs in the same way (Global Reader is enough). Expect **PASS** for Partner entry, Trust settings, M365 Collab trust, and each expected capability. A WARN on Trust settings means Step 3 doesn't match the standard; fix it in the portal, though it doesn't block calendar sharing. **Don't cut over until both sides have no FAIL results.** Keep the CSV for the change record.
+It signs in the same way. It asks for read-only permissions (`Policy.Read.All`, plus `CrossTenantInformation.ReadBasic.All` to show partner names), so its consent prompt looks different; leave "Consent on behalf of your organization" unticked here too. A Global Administrator can run it straight away. A Global Reader can run it only after an administrator has approved these permissions for the tool, because read access to policies needs admin consent; if a Global Reader gets **Need admin approval**, have the Global Administrator run the check instead. Expect **PASS** for Partner entry, Trust settings, M365 Collab trust, and each expected capability. A WARN on Trust settings means Step 3 doesn't match the standard; fix it in the portal, though it doesn't block calendar sharing. **Don't cut over until both sides have no FAIL results.** Keep the CSV for the change record.
 
 ## Step 6: Cut over and validate
 
