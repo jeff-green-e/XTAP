@@ -1,6 +1,8 @@
-# Cross-Tenant Calendar Sharing Migration Checklist (EWS → M365 XTAP)
+# Runbook: Migrate Existing Sharing (EWS → M365 XTAP)
 
-Last updated: September 28, 2026. If you haven't read it yet, start with [How It Works](01-how-it-works.md) for the concepts and diagrams behind these steps.
+Last updated: September 29, 2026. If you haven't read it yet, start with [How It Works](01-how-it-works.md) for the concepts and diagrams behind these steps.
+
+**Use this runbook when** a tenant already shares Free/Busy, MailTips, or calendars with the partner through an Organization Relationship, Sharing Policy rule, or Availability Address Space. If neither tenant has any of those for the other, use [Set Up New Sharing](03-set-up-new-sharing.md) instead. Not sure? Step 1 below is read-only and tells you.
 
 ## Overview
 
@@ -12,7 +14,7 @@ Microsoft is retiring Exchange Web Services (EWS) in Exchange Online: soft block
 | 2. M365 Collaboration trust | A per-partner inbound trust flag (`m365CollaborationInbound`) that must be on before Layer 3 does anything | Microsoft Graph (beta); no portal UI yet |
 | 3. M365 capabilities | The actual grants: Free/Busy (basic/limited details), MailTips (limited/all), Calendar Sharing (simple/detail/reviewer), plus anonymous variants | Microsoft Graph (beta); no portal UI yet |
 
-**What "inbound" means in this checklist.** Every XTAP setting is configured on one tenant and names one partner tenant. *Inbound* means requests from the partner's users coming *into* the tenant you're configuring. Granting an inbound capability lets the partner's users see this tenant's data. So on Op-Co A's tenant, an inbound Free/Busy grant for Op-Co B lets B's users see A's free/busy.
+**What "inbound" means in this runbook.** Every XTAP setting is configured on one tenant and names one partner tenant. *Inbound* means requests from the partner's users coming *into* the tenant you're configuring. Granting an inbound capability lets the partner's users see this tenant's data. So on Op-Co A's tenant, an inbound Free/Busy grant for Op-Co B lets B's users see A's free/busy.
 
 For each pair of operating companies that shares calendars/free-busy, both tenants must configure Layers 2 and 3 pointing at each other. This is bidirectional and can be asymmetric: each side decides what the other side may see of it, and the two sides don't have to grant the same level.
 
@@ -232,7 +234,7 @@ Get-AvailabilityAddressSpace "<partner-domain>" | Export-CliXML ".\AvailabilityA
 Remove-AvailabilityAddressSpace "<partner-domain>"
 ```
 
-Microsoft's guide disables the whole Sharing Policy (`Set-SharingPolicy -Enabled $false`). This checklist removes just the partner's rule instead, because disabling a policy also breaks every other sharing rule for the mailboxes assigned to it, which includes every mailbox on the Default policy. Disable the whole policy only if it contains nothing but this partner's rule.
+Microsoft's guide disables the whole Sharing Policy (`Set-SharingPolicy -Enabled $false`). This runbook removes just the partner's rule instead, because disabling a policy also breaks every other sharing rule for the mailboxes assigned to it, which includes every mailbox on the Default policy. Disable the whole policy only if it contains nothing but this partner's rule.
 
 **2. Test, in both directions:**
 

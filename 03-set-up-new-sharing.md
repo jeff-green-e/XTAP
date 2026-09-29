@@ -1,6 +1,6 @@
-# Cross-Tenant Calendar Sharing: New Partner Setup
+# Runbook: Set Up New Sharing
 
-Last updated: September 28, 2026. If you haven't read it yet, start with [How It Works](01-how-it-works.md) for the concepts behind these steps.
+Last updated: September 29, 2026. If you haven't read it yet, start with [How It Works](01-how-it-works.md) for the concepts behind these steps.
 
 ## When to use this doc
 
@@ -10,7 +10,7 @@ Use this runbook when two tenants need to share Free/Busy, MailTips, or calendar
 - Two existing op-cos that never shared before and now need to.
 - A new external partner hosted in Microsoft 365 that the business has approved for calendar sharing.
 
-If either tenant already has an Organization Relationship, Sharing Policy rule, or Availability Address Space for the other, use the [migration checklist](02-migration-checklist.md) instead. Old configuration takes precedence over XTAP, so a stray leftover entry will hide whether the new setup works.
+If either tenant already has an Organization Relationship, Sharing Policy rule, or Availability Address Space for the other, use [Migrate Existing Sharing](02-migrate-existing-sharing.md) instead. Old configuration takes precedence over XTAP, so a stray leftover entry will hide whether the new setup works.
 
 Net-new setup is simpler than migration: there's nothing to discover, no old configuration to turn off, and nothing to clean up. It's a check of the partner entry in the portal, Layers 2 and 3 in PowerShell on each side, then a test.
 
@@ -39,7 +39,7 @@ The Scheduling Assistant scenario ("add a colleague from the other op-co and see
 **Confirm in your own tenant:**
 
 - **The rollout has reached both tenants.** XTAP for Free/Busy, MailTips, and Calendar Sharing is still rolling out; check Message Center (MC1446796).
-- **No leftover EWS-era config for this partner.** Run the Step 1 discovery commands from the [migration checklist](02-migration-checklist.md#step-1-discovery). If anything names the partner's domains, including a wildcard `*` Sharing Policy rule, handle it through the migration checklist first.
+- **No leftover EWS-era config for this partner.** Run the Step 1 discovery commands from [Migrate Existing Sharing](02-migrate-existing-sharing.md#step-1-discovery). If anything names the partner's domains, including a wildcard `*` Sharing Policy rule, switch to that runbook.
 - **Roles:** Global Administrator to create the M365 Collaboration trust (Step 3). Global Administrator or Exchange Administrator can grant capabilities (Step 4). Reviewing or adding the partner organization in the portal (Step 1) needs Security Administrator or Global Administrator.
 - **Scoping group (optional):** if only some of your users should be visible to the partner, create a security group of those users now and note its object ID.
 
@@ -60,7 +60,7 @@ Trust settings govern B2B guest sign-ins. Calendar sharing doesn't depend on the
 Layers 2 and 3 have no portal UI yet, so Steps 2 to 4 use PowerShell. Choose one path:
 
 - **Script (recommended):** run [Enable-XtapPartner.ps1](Enable-XtapPartner.ps1). It does its own device-code sign-in and Steps 3 and 4, so **skip the rest of this step and the code blocks in Steps 3 and 4**. It checks that the Step 1 partner entry exists, won't overwrite a Layer 2 setting someone has limited or blocked, grants Free/Busy times only unless you pass `-Capability` (names in "Before you start"), always grants to all users, and can be tried first with `-WhatIf`.
-- **Manual:** run the device-code sign-in from the [migration checklist, Step 2](02-migration-checklist.md#step-2-prerequisites-and-sign-in), with `$tenantId` set to *your* tenant, signing in as a Global Administrator. Then run the code blocks in Steps 3 and 4 **in the same PowerShell window**: the sign-in sets `$headers`, which they use. If you close the window or the token expires (after roughly 60 to 90 minutes), sign in again. Use this path if you need to limit a grant to a security group.
+- **Manual:** run the device-code sign-in from [Migrate Existing Sharing, Step 2](02-migrate-existing-sharing.md#step-2-prerequisites-and-sign-in), with `$tenantId` set to *your* tenant, signing in as a Global Administrator. Then run the code blocks in Steps 3 and 4 **in the same PowerShell window**: the sign-in sets `$headers`, which they use. If you close the window or the token expires (after roughly 60 to 90 minutes), sign in again. Use this path if you need to limit a grant to a security group.
 
 Either way, the first sign-in in a tenant asks you to consent to `Policy.ReadWrite.CrossTenantAccess` and `Policy.ReadWrite.CrossTenantCapability`; accept both.
 

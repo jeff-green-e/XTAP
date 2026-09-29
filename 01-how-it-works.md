@@ -1,6 +1,20 @@
 # Cross-Tenant Calendar Sharing: How It Works
 
-Read this first. It explains what's moving, why, and where each setting lives. When you're ready to do the work, the [migration checklist](02-migration-checklist.md) is the runbook for moving existing sharing off EWS, and [new partner setup](03-new-partner-setup.md) covers sharing with a tenant you've never shared with before.
+Read this first. It explains what's moving, why, and where each setting lives, and helps you pick the right runbook.
+
+## Which runbook do I need?
+
+There are two runbooks. Pick by **partner pairing**, not by project: the same op-co can need one runbook for one partner and the other for a different partner.
+
+| Does either tenant already share with the other through… | Use |
+| --- | --- |
+| An Organization Relationship, a Sharing Policy rule for the partner's domain (or a wildcard `*` rule), or an Availability Address Space | [**Migrate Existing Sharing**](02-migrate-existing-sharing.md): discover what's there, set up XTAP, cut over, then clean up the old config |
+| None of those, on either side | [**Set Up New Sharing**](03-set-up-new-sharing.md): set up XTAP on both sides and test. Shorter, with no cutover or cleanup |
+| Not sure | Run the read-only discovery in [Migrate Existing Sharing, Step 1](02-migrate-existing-sharing.md#step-1-discovery). If it finds nothing for the partner, switch to Set Up New Sharing |
+
+Why it matters: old configuration takes precedence over XTAP. Following Set Up New Sharing while an old Organization Relationship is still active means the new setup can't be tested properly, and the old one breaks when EWS is shut off.
+
+Both runbooks use the same scripts ([Enable-XtapPartner.ps1](Enable-XtapPartner.ps1) and [Test-XtapPartner.ps1](Test-XtapPartner.ps1)) for the XTAP setup itself. The difference is what happens around it: discovery, cutover, and cleanup of the old config.
 
 ## The short version
 
