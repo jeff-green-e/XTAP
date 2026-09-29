@@ -124,27 +124,7 @@ Change the level only if the business wants to as part of this migration.
 
 **Group-limited sharing:** if the old Organization Relationship used `FreeBusyAccessScope` or `MailTipsAccessScope` (a group), or different mailboxes were on different Sharing Policies, the grant needs to be limited to a security group. The script always grants to all users, so use the [manual steps](#appendix-manual-powershell-steps) for those capabilities.
 
-### Dry run
-
-Run with `-WhatIf` first. It signs in and reads the current settings, but changes nothing:
-
-```powershell
-.\Enable-XtapPartner.ps1 -TenantId <this-tenant-id> -PartnerTenantId <partner-tenant-id> -WhatIf
-```
-
-1. The script prints a URL and a code. Open the URL in a browser, enter the code, and sign in as a Global Administrator of **this** tenant (the one you're configuring).
-2. The first time in a tenant, Microsoft shows a **Permissions requested** prompt for Microsoft Graph Command Line Tools (published by Microsoft Corporation):
-
-   ![Permissions requested prompt for Microsoft Graph Command Line Tools, listing cross tenant access policies, M365 cross tenant access capabilities, basic profile, and maintain access, with the "Consent on behalf of your organization" checkbox unticked](images/05-consent-prompt.png)
-
-   - The first two lines are the permissions the script needs: *cross tenant access policies* (`Policy.ReadWrite.CrossTenantAccess`) and *M365 cross tenant access capabilities* (`Policy.ReadWrite.CrossTenantCapability`). *View your basic profile* and *Maintain access to data you have given it access to* are standard sign-in permissions that Microsoft adds.
-   - **Leave "Consent on behalf of your organization" unticked.** Ticking it approves the tool for everyone in the tenant, which the script doesn't need.
-   - Select **Accept**. This only lets the tool act with the admin rights you already have, and you won't be asked again in this tenant.
-3. Check the "What if" lines: one for turning on M365 Collaboration trust (unless it's already on) and one for each capability not yet granted.
-
 ### Run it
-
-Run the same command without `-WhatIf`, adding `-Capability` if you need more than Free/Busy times:
 
 ```powershell
 # Free/Busy times only (the default)
@@ -154,6 +134,25 @@ Run the same command without `-WhatIf`, adding `-Capability` if you need more th
 .\Enable-XtapPartner.ps1 -TenantId <this-tenant-id> -PartnerTenantId <partner-tenant-id> `
     -Capability crossTenantCalendarAvailabilityLimitedDetails, crossTenantMailTipsAll
 ```
+
+1. **Sign in.** The script prints a URL and a code. Open the URL in a browser, enter the code, and sign in as a Global Administrator of **this** tenant (the one you're configuring).
+2. **Consent (first time in a tenant only).** Microsoft shows a **Permissions requested** prompt for Microsoft Graph Command Line Tools (published by Microsoft Corporation):
+
+   ![Permissions requested prompt for Microsoft Graph Command Line Tools, listing cross tenant access policies, M365 cross tenant access capabilities, basic profile, and maintain access, with the "Consent on behalf of your organization" checkbox unticked](images/05-consent-prompt.png)
+
+   - The first two lines are the permissions the script needs: *cross tenant access policies* (`Policy.ReadWrite.CrossTenantAccess`) and *M365 cross tenant access capabilities* (`Policy.ReadWrite.CrossTenantCapability`). *View your basic profile* and *Maintain access to data you have given it access to* are standard sign-in permissions that Microsoft adds.
+   - **Leave "Consent on behalf of your organization" unticked.** Ticking it approves the tool for everyone in the tenant, which the script doesn't need.
+   - Select **Accept**. This only lets the tool act with the admin rights you already have, and you won't be asked again in this tenant.
+3. **Confirm each change.** Back in PowerShell, the script shows each change before making it and waits for an answer:
+
+   ```text
+   Confirm
+   Are you sure you want to perform this action?
+   Performing the operation "Turn on M365 Collaboration trust for all users" on target "partner <partner-tenant-id>".
+   [Y] Yes  [A] Yes to All  [N] No  [L] No to All  [S] Suspend  [?] Help (default is "Y"):
+   ```
+
+   Check that the partner ID is the one you expect, then type **Y** (or **A** to accept all remaining changes in this run). **N** skips that change. Pressing Enter on its own counts as Yes. You'll get one prompt for M365 Collaboration trust, unless it's already on, and one for each capability not yet granted. If nothing needs changing, there are no prompts.
 
 A successful run ends with a summary like this:
 
@@ -166,7 +165,7 @@ Partner <partner-tenant-id>, as configured in tenant <this-tenant-id>
   Capability: crossTenantCalendarAvailabilityBasic: allowed for all users
 ```
 
-"Already on" or "already configured, no change" lines are fine; that part was set up before. Running the script again is always safe. If it stops with an error, see the [error table in Set Up New Sharing](03-set-up-new-sharing.md#if-the-script-stops); the messages and fixes are the same.
+"Already on" or "already configured, no change" lines are fine; that part was set up before. Running the script again is always safe. To preview without being asked or changing anything, add `-WhatIf`; to skip the prompts, add `-Confirm:$false`. If it stops with an error, see the [error table in Set Up New Sharing](03-set-up-new-sharing.md#if-the-script-stops); the messages and fixes are the same.
 
 **Both sides must do this.** The script only configures the tenant you sign in to. For Op-Co A and Op-Co B to see each other, A's admin runs it with B as the partner, and B's admin runs it with A as the partner.
 

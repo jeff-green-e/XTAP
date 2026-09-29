@@ -24,8 +24,9 @@
 
     Signs in with device-code flow as you (Global Administrator), using Microsoft's
     first-party Graph Command Line Tools client. No app registration or secret.
-    Re-running is safe: settings that already exist are left alone, so you can run it
-    again later to add another capability.
+    Before each change it shows what it's about to do and asks you to confirm (Y/N).
+    Nothing is asked when everything is already set. Re-running is safe: settings that
+    already exist are left alone, so you can run it again later to add another capability.
 
 .PARAMETER TenantId
     Your tenant: the one whose data the partner will be allowed to see.
@@ -52,14 +53,18 @@
     .\Enable-XtapPartner.ps1 -TenantId <id> -PartnerTenantId <id> -Verbose
 
 .EXAMPLE
-    # Show what would change without changing anything
-    .\Enable-XtapPartner.ps1 -TenantId <id> -PartnerTenantId <id> `
-        -Capability crossTenantMailTipsAll -WhatIf
+    # Preview only: show what would change without asking or changing anything
+    .\Enable-XtapPartner.ps1 -TenantId <id> -PartnerTenantId <id> -WhatIf
+
+.EXAMPLE
+    # No confirmation prompts (e.g. when scripting several partners)
+    .\Enable-XtapPartner.ps1 -TenantId <id> -PartnerTenantId <id> -Confirm:$false
 
 .LINK
     https://learn.microsoft.com/en-us/exchange/sharing/migrate-to-m365-xtap
 #>
-[CmdletBinding(SupportsShouldProcess)]
+# ConfirmImpact High: PowerShell asks Y/N before each change (skip with -Confirm:$false)
+[CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
 param(
     [Parameter(Mandatory)]
     [guid] $TenantId,
@@ -181,6 +186,8 @@ if ($allUsersOn) {
     if ($PSCmdlet.ShouldProcess("partner $PartnerTenantId", "Turn on M365 Collaboration trust for all users")) {
         Invoke-RestMethod -Method Patch -Uri $graphBase -Headers $headers -Body $body @jsonParams | Out-Null
         Write-Host "Layer 2: M365 Collaboration trust turned on." -ForegroundColor Green
+    } else {
+        Write-Host "Layer 2: skipped, not changed. Capabilities have no effect until it's on." -ForegroundColor Yellow
     }
 }
 
@@ -214,6 +221,8 @@ foreach ($cap in $Capability | Select-Object -Unique) {
     if ($PSCmdlet.ShouldProcess("partner $PartnerTenantId", "Grant $cap (all users)")) {
         Invoke-RestMethod -Method Post -Uri "$graphBase/m365Capabilities" -Headers $headers -Body $body @jsonParams | Out-Null
         Write-Host "Layer 3: granted $cap to partner (all users)." -ForegroundColor Green
+    } else {
+        Write-Host "Layer 3: skipped $cap, not changed." -ForegroundColor Yellow
     }
 }
 

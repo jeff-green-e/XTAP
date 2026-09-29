@@ -84,34 +84,7 @@ Windows marks files downloaded through a browser as coming from the internet, an
 
 Files you get with `git clone` aren't marked, so they don't need unblocking.
 
-### Dry run
-
-Run it with `-WhatIf` first. It signs in and reads the current settings, but changes nothing:
-
-```powershell
-.\Enable-XtapPartner.ps1 -TenantId <your-tenant-id> -PartnerTenantId <partner-tenant-id> -WhatIf
-```
-
-1. The script prints a URL and a code. Open the URL in a browser, enter the code, and sign in as a Global Administrator of **your** tenant.
-2. The first time in a tenant, Microsoft shows a **Permissions requested** prompt for Microsoft Graph Command Line Tools (published by Microsoft Corporation):
-
-   ![Permissions requested prompt for Microsoft Graph Command Line Tools, listing cross tenant access policies, M365 cross tenant access capabilities, basic profile, and maintain access, with the "Consent on behalf of your organization" checkbox unticked](images/05-consent-prompt.png)
-
-   - The first two lines are the permissions the script needs: *cross tenant access policies* (`Policy.ReadWrite.CrossTenantAccess`) and *M365 cross tenant access capabilities* (`Policy.ReadWrite.CrossTenantCapability`). *View your basic profile* and *Maintain access to data you have given it access to* are standard sign-in permissions that Microsoft adds.
-   - **Leave "Consent on behalf of your organization" unticked.** Ticking it approves the tool for everyone in the tenant, which the script doesn't need.
-   - Select **Accept**. This only lets the tool act with the admin rights you already have, and you won't be asked again in this tenant.
-3. Back in PowerShell, check the "What if" lines. For a new partner you should see one for turning on M365 Collaboration trust and one for each capability:
-
-```text
-What if: Performing the operation "Turn on M365 Collaboration trust for all users" on target "partner <partner-tenant-id>".
-What if: Performing the operation "Grant crossTenantCalendarAvailabilityBasic (all users)" on target "partner <partner-tenant-id>".
-```
-
-If the script stops with an error instead, see [If the script stops](#if-the-script-stops).
-
 ### Run it
-
-Run the same command without `-WhatIf`, and sign in again the same way. To grant more than Free/Busy times, add `-Capability`:
 
 ```powershell
 # Free/Busy times only (the default)
@@ -121,6 +94,25 @@ Run the same command without `-WhatIf`, and sign in again the same way. To grant
 .\Enable-XtapPartner.ps1 -TenantId <your-tenant-id> -PartnerTenantId <partner-tenant-id> `
     -Capability crossTenantCalendarAvailabilityBasic, crossTenantMailTipsAll
 ```
+
+1. **Sign in.** The script prints a URL and a code. Open the URL in a browser, enter the code, and sign in as a Global Administrator of **your** tenant.
+2. **Consent (first time in a tenant only).** Microsoft shows a **Permissions requested** prompt for Microsoft Graph Command Line Tools (published by Microsoft Corporation):
+
+   ![Permissions requested prompt for Microsoft Graph Command Line Tools, listing cross tenant access policies, M365 cross tenant access capabilities, basic profile, and maintain access, with the "Consent on behalf of your organization" checkbox unticked](images/05-consent-prompt.png)
+
+   - The first two lines are the permissions the script needs: *cross tenant access policies* (`Policy.ReadWrite.CrossTenantAccess`) and *M365 cross tenant access capabilities* (`Policy.ReadWrite.CrossTenantCapability`). *View your basic profile* and *Maintain access to data you have given it access to* are standard sign-in permissions that Microsoft adds.
+   - **Leave "Consent on behalf of your organization" unticked.** Ticking it approves the tool for everyone in the tenant, which the script doesn't need.
+   - Select **Accept**. This only lets the tool act with the admin rights you already have, and you won't be asked again in this tenant.
+3. **Confirm each change.** Back in PowerShell, the script shows each change before making it and waits for an answer:
+
+   ```text
+   Confirm
+   Are you sure you want to perform this action?
+   Performing the operation "Turn on M365 Collaboration trust for all users" on target "partner <partner-tenant-id>".
+   [Y] Yes  [A] Yes to All  [N] No  [L] No to All  [S] Suspend  [?] Help (default is "Y"):
+   ```
+
+   Check that the partner ID is the one you expect, then type **Y** (or **A** to accept all remaining changes in this run). **N** skips that change. Pressing Enter on its own counts as Yes. You'll get one prompt for M365 Collaboration trust, unless it's already on, and one for each capability not yet granted. If nothing needs changing, there are no prompts.
 
 A successful run ends with a summary like this:
 
@@ -136,6 +128,8 @@ Partner <partner-tenant-id>, as configured in tenant <your-tenant-id>
 
 "Already on" or "already configured, no change" lines are fine too. They mean that part was set up before, and the script left it alone. Running the script again is always safe, so you can add a capability later the same way.
 
+To preview without being asked or changing anything, add `-WhatIf`. To skip the prompts, for example when scripting several partners, add `-Confirm:$false`.
+
 ### If the script stops
 
 | Message | What it means | What to do |
@@ -146,6 +140,7 @@ Partner <partner-tenant-id>, as configured in tenant <your-tenant-id>
 | `Layer 2: M365 Collaboration trust for this partner is already set to something other than 'allowed for all users'` | Someone has limited or blocked the trust for this partner. The script won't widen it. | Find out who set it and why before changing anything. The message shows the current setting. |
 | **Need admin approval** in the browser during sign-in | The account can't approve the tool's permissions for itself (usually a non-admin running the check script). | Sign in as a Global Administrator, or have one approve the permissions first. |
 | `403` / `Authorization_RequestDenied` | The account isn't a Global Administrator, or the consent prompt was declined. | Sign in with a Global Administrator account and accept the consent prompt. |
+| `Layer 2: skipped` or `Layer 3: skipped …` | You answered **N** at a prompt (or used `-WhatIf`). | Run the script again and answer **Y** when the change is the one you want. |
 | `The sign-in code expired` | Sign-in wasn't finished in time (about 15 minutes). | Run the script again. |
 | An `AADSTS…` error during sign-in | Usually the wrong `-TenantId`, or signing in with an account from a different tenant. | Check the tenant ID, and sign in with an account from that tenant. |
 | `Cannot validate argument on parameter 'Capability'` | A capability name is misspelled or outdated. | Use the exact name from the table in [Before you start](#before-you-start). |
