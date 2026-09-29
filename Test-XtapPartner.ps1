@@ -18,7 +18,7 @@
 
     It does not check old EWS-era configuration (Organization Relationships, Sharing Policies,
     Availability Address Spaces) and doesn't prove Free/Busy works for users. Use the Outlook
-    tests in the runbook for that (02 Step 5 / 03 Step 6).
+    tests in the runbook for that (02 Step 5 / 03 Step 5).
 
     The sign-in block is shared with Enable-XtapPartner.ps1 and the 02 runbook; keep
     them in step.
