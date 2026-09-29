@@ -1,22 +1,16 @@
 # Runbook: Set Up New Sharing
 
-Last updated: September 29, 2026. If you haven't read it yet, start with [How It Works](01-how-it-works.md) for the concepts behind these steps.
+Last updated: September 29, 2026. New to this? Read [How It Works](01-how-it-works.md) first.
 
 ## When to use this doc
 
-Use this runbook when two tenants need to share Free/Busy, MailTips, or calendars and **neither side has any existing EWS-era configuration for the other**. Typical cases:
+Use this runbook when two tenants need to share and **neither has any EWS-era configuration for the other**, for example a newly acquired op-co, or two op-cos that never shared. If either has an Organization Relationship, Sharing Policy rule, or Availability Address Space for the other, use [Migrate Existing Sharing](02-migrate-existing-sharing.md) instead.
 
-- A newly acquired or newly created op-co that needs to share with the others.
-- Two existing op-cos that never shared before and now need to.
-- A new external partner hosted in Microsoft 365 that the business has approved for calendar sharing.
-
-If either tenant already has an Organization Relationship, Sharing Policy rule, or Availability Address Space for the other, use [Migrate Existing Sharing](02-migrate-existing-sharing.md) instead. Old configuration takes precedence over XTAP, so a stray leftover entry will hide whether the new setup works.
-
-Net-new setup is simpler than migration: there's nothing to discover, no old configuration to turn off, and nothing to clean up. On each side it's a check of the partner entry in the portal, one script run, and a configuration check; then both sides test together.
+Each side checks the partner in the portal, runs one script, and checks the result; then both sides test together.
 
 ## Before you start
 
-**Agree with the partner on what each side shares.** Each tenant decides only what the *other* side may see of it, and the two sides don't have to match (see [inbound, per tenant](01-how-it-works.md#who-configures-what-inbound-per-tenant)). Pick capabilities from this table. Names are case-sensitive.
+**Agree with the partner on what each side shares.** Each side decides what the other may see of it, and the two don't have to match. Names are case-sensitive.
 
 | Need | Capability |
 | --- | --- |
@@ -28,52 +22,44 @@ Net-new setup is simpler than migration: there's nothing to discover, no old con
 | Users can share their calendar: times, subject, location | `crossTenantCalendarSharingFreeBusyDetail` |
 | Users can share their full calendar | `crossTenantCalendarSharingFreeBusyReviewer` |
 
-The Scheduling Assistant scenario ("add a colleague from the other op-co and see when they're free") only needs a Free/Busy capability. Grant MailTips and Calendar Sharing only if the business asks for them.
+Scheduling Assistant only needs the first one, the script's default. Grant the others only if the business asks.
 
 **Collect from the partner:**
 
-- Their Entra **Tenant ID** (Entra admin center → Identity → Overview → Tenant ID). Domain names aren't needed.
-- The name of an admin who will configure their side and test with you.
-- Confirmation that they're hosted in Exchange Online. XTAP doesn't cover on-premises or hybrid free/busy.
+- Their **Tenant ID** (Entra admin center → Identity → Overview). Domains aren't needed.
+- An admin who will configure their side and test with you.
+- Confirmation they're on Exchange Online (not on-premises or hybrid).
 
 **Confirm in your own tenant:**
 
-- **The rollout has reached both tenants.** XTAP for Free/Busy, MailTips, and Calendar Sharing is still rolling out; check Message Center (MC1446796).
-- **No leftover EWS-era config for this partner.** Run the Step 1 discovery commands from [Migrate Existing Sharing](02-migrate-existing-sharing.md#step-1-discovery). If anything names the partner's domains, including a wildcard `*` Sharing Policy rule, switch to that runbook.
-- **Roles:** Security Administrator or Global Administrator for the portal check (Step 1). **Global Administrator** to run the enable script (Step 2), because it turns on M365 Collaboration trust. The configuration check (Step 3) can be run by the same Global Administrator, or by a Global Reader once an admin has approved the tool's read permissions.
-- **Scoping group (optional):** if only some of your users should be visible to the partner, create a security group of those users now and note its object ID. The script always grants to all users, so a group-limited grant uses the [manual steps](#appendix-manual-powershell-steps) instead.
+- **The rollout has reached both tenants** (Message Center MC1446796).
+- **No leftover EWS-era config** for this partner: run the [discovery commands](02-migrate-existing-sharing.md#step-1-discovery). If anything matches, including a wildcard `*` Sharing Policy rule, use Migrate Existing Sharing.
+- **Roles:** Step 1: Security Administrator or Global Administrator. Step 2: **Global Administrator**. Step 3: Global Administrator, or Global Reader once an admin has approved the tool.
+- **Only some users visible to the partner?** The script always grants to all users; use the [manual steps](#appendix-manual-powershell-steps) with a security group.
 
 ## Step 1: Verify the partner organization in Entra admin center (Layer 1)
 
-Layer 1 is configured in the portal, not with PowerShell. In most cases the partner is already there and you only need to check it.
+The partner is usually already there, so this is a check.
 
 1. Go to **Entra admin center → Identity → External Identities → Cross-tenant access settings → Organizational settings**.
-2. Look for the partner in the list, by name or Tenant ID.
-   - **Listed**: go to step 3.
-   - **Not listed**: select **Add organization**, enter the partner's Tenant ID, and select **Add**. The new entry inherits your default settings; don't change anything else here unless your B2B standards call for it.
-3. Open the partner's **Inbound access** and check the **Trust settings** tab against your environment's standard: *Trust multifactor authentication from Microsoft Entra tenants* is on; compliant and hybrid-joined device trust are off. Fix it here if it doesn't match.
-
-Trust settings govern B2B guest sign-ins. Calendar sharing doesn't depend on them, so a mismatch won't break Free/Busy, but this is the natural moment to confirm the entry is correct.
+2. Find the partner. If it's missing, select **Add organization**, enter its Tenant ID, and select **Add**.
+3. Open the partner's **Inbound access → Trust settings** and confirm the standard: MFA trusted; compliant and hybrid-joined device trust off. Fix it there if not. (Trust settings affect B2B sign-ins, not calendar sharing.)
 
 ## Step 2: Turn on sharing with Enable-XtapPartner.ps1 (Layers 2 and 3)
 
-Layers 2 and 3 have no portal UI yet, so this step uses [Enable-XtapPartner.ps1](Enable-XtapPartner.ps1). It signs you in, turns on M365 Collaboration trust for the partner (Layer 2), and grants the capabilities you agreed (Layer 3). It never changes the Layer 1 settings you checked in Step 1.
+There's no portal UI for Layers 2 and 3, so [Enable-XtapPartner.ps1](Enable-XtapPartner.ps1) does them: it turns on M365 Collaboration trust and grants the capabilities you agreed. It won't change Layer 1.
 
 ### Get ready
 
-- **The scripts**: download `Enable-XtapPartner.ps1` and `Test-XtapPartner.ps1` from this repo into one folder. Downloaded scripts are usually blocked; [unblock them](#unblock-the-downloaded-scripts) before running.
-- **PowerShell**: PowerShell 7 (Windows PowerShell 5.1 should also work), in a normal (not elevated) window, opened in that folder. No modules to install. If the execution policy stops the script, run `Set-ExecutionPolicy -Scope Process Bypass`; that only affects this window.
-- **Values**:
-  - `-TenantId`: *your* tenant ID, the tenant whose users the partner will see.
-  - `-PartnerTenantId`: the partner's tenant ID.
-  - `-Capability`: only if you're granting more than Free/Busy times. Use the exact names from the table in [Before you start](#before-you-start), separated by commas.
-- **A browser** where you can sign in as a Global Administrator of your tenant.
+- **The scripts**: download `Enable-XtapPartner.ps1` and `Test-XtapPartner.ps1` into one folder and [unblock them](#unblock-the-downloaded-scripts).
+- **PowerShell 7** (5.1 should also work), opened in that folder. If the execution policy blocks the scripts, run `Set-ExecutionPolicy -Scope Process Bypass` (this window only).
+- **Values**: `-TenantId` is *your* tenant; `-PartnerTenantId` is the partner's; `-Capability` only if you need more than Free/Busy times (names from [Before you start](#before-you-start), comma-separated).
 
 ### Unblock the downloaded scripts
 
-Windows marks files downloaded through a browser as coming from the internet, and PowerShell won't run them until they're unblocked. A blocked script fails with an error like *"Enable-XtapPartner.ps1 cannot be loaded. The file … is not digitally signed. You cannot run this script on the current system."* Unblock both scripts once after downloading, either way:
+Windows blocks scripts downloaded through a browser. A blocked script fails with *"…is not digitally signed. You cannot run this script on the current system."* Unblock both once, either way:
 
-- **File Explorer**: right-click the file → **Properties** → **General** tab → tick **Unblock** → **OK**. If there's no Unblock checkbox, the file isn't blocked.
+- **File Explorer**: right-click → **Properties** → tick **Unblock** → **OK**. No checkbox means it isn't blocked.
 - **PowerShell**, in the folder with the scripts:
 
   ```powershell
@@ -82,7 +68,7 @@ Windows marks files downloaded through a browser as coming from the internet, an
 
 ![File Properties dialog for Enable-XtapPartner.ps1, with the Unblock checkbox ticked next to "This file came from another computer and might be blocked to help protect this computer"](images/04-unblock-script.png)
 
-Files you get with `git clone` aren't marked, so they don't need unblocking.
+Files from `git clone` don't need unblocking.
 
 ### Run it
 
@@ -95,15 +81,11 @@ Files you get with `git clone` aren't marked, so they don't need unblocking.
     -Capability crossTenantCalendarAvailabilityBasic, crossTenantMailTipsAll
 ```
 
-1. **Sign in.** The script prints a URL and a code. Open the URL in a browser, enter the code, and sign in as a Global Administrator of **your** tenant.
-2. **Consent (first time in a tenant only).** Microsoft shows a **Permissions requested** prompt for Microsoft Graph Command Line Tools (published by Microsoft Corporation):
+1. **Sign in.** Open the URL the script prints, enter the code, and sign in as a Global Administrator of **your** tenant.
+2. **Consent (first time per tenant).** Microsoft shows a **Permissions requested** prompt for Microsoft Graph Command Line Tools. The first two lines are what the script needs; the others are standard sign-in permissions. **Leave "Consent on behalf of your organization" unticked**, then select **Accept**.
 
    ![Permissions requested prompt for Microsoft Graph Command Line Tools, listing cross tenant access policies, M365 cross tenant access capabilities, basic profile, and maintain access, with the "Consent on behalf of your organization" checkbox unticked](images/05-consent-prompt.png)
-
-   - The first two lines are the permissions the script needs: *cross tenant access policies* (`Policy.ReadWrite.CrossTenantAccess`) and *M365 cross tenant access capabilities* (`Policy.ReadWrite.CrossTenantCapability`). *View your basic profile* and *Maintain access to data you have given it access to* are standard sign-in permissions that Microsoft adds.
-   - **Leave "Consent on behalf of your organization" unticked.** Ticking it approves the tool for everyone in the tenant, which the script doesn't need.
-   - Select **Accept**. This only lets the tool act with the admin rights you already have, and you won't be asked again in this tenant.
-3. **Confirm each change.** Back in PowerShell, the script shows each change before making it and waits for an answer:
+3. **Confirm each change** back in PowerShell:
 
    ```text
    Confirm
@@ -112,7 +94,7 @@ Files you get with `git clone` aren't marked, so they don't need unblocking.
    [Y] Yes  [A] Yes to All  [N] No  [L] No to All  [S] Suspend  [?] Help (default is "Y"):
    ```
 
-   Check that the partner ID is the one you expect, then type **Y** (or **A** to accept all remaining changes in this run). **N** skips that change. Pressing Enter on its own counts as Yes. You'll get one prompt for M365 Collaboration trust, unless it's already on, and one for each capability not yet granted. If nothing needs changing, there are no prompts.
+   Check the partner ID, then type **Y** (or **A** for all). **N** skips that change. **Enter alone counts as Yes.** There's one prompt per change needed; none if everything is already set.
 
 A successful run ends with a summary like this:
 
@@ -126,28 +108,26 @@ Partner <partner-tenant-id>, as configured in tenant <your-tenant-id>
   Capability: crossTenantCalendarAvailabilityBasic: allowed for all users
 ```
 
-"Already on" or "already configured, no change" lines are fine too. They mean that part was set up before, and the script left it alone. Running the script again is always safe, so you can add a capability later the same way.
-
-To preview without being asked or changing anything, add `-WhatIf`. To skip the prompts, for example when scripting several partners, add `-Confirm:$false`.
+"Already on" or "no change" lines are fine, and rerunning is always safe (e.g. to add a capability later). `-WhatIf` previews without changing anything; `-Confirm:$false` skips the prompts.
 
 ### If the script stops
 
 | Message | What it means | What to do |
 | --- | --- | --- |
 | `… is not digitally signed. You cannot run this script on the current system.` | The downloaded script is still blocked. | [Unblock it](#unblock-the-downloaded-scripts) and run it again. |
-| `… cannot be loaded because running scripts is disabled on this system.` | The PowerShell execution policy doesn't allow scripts. | Run `Set-ExecutionPolicy -Scope Process Bypass` (this window only) and run it again. |
+| `… cannot be loaded because running scripts is disabled on this system.` | The execution policy blocks scripts. | Run `Set-ExecutionPolicy -Scope Process Bypass`, then run it again. |
 | `No cross-tenant access entry for partner …` | The partner isn't under Organizational settings. | Add it in the portal ([Step 1](#step-1-verify-the-partner-organization-in-entra-admin-center-layer-1)), then run the script again. |
-| `Layer 2: M365 Collaboration trust for this partner is already set to something other than 'allowed for all users'` | Someone has limited or blocked the trust for this partner. The script won't widen it. | Find out who set it and why before changing anything. The message shows the current setting. |
-| **Need admin approval** in the browser during sign-in | The account can't approve the tool's permissions for itself (usually a non-admin running the check script). | Sign in as a Global Administrator, or have one approve the permissions first. |
-| `403` / `Authorization_RequestDenied` | The account isn't a Global Administrator, or the consent prompt was declined. | Sign in with a Global Administrator account and accept the consent prompt. |
-| `Layer 2: skipped` or `Layer 3: skipped …` | You answered **N** at a prompt (or used `-WhatIf`). | Run the script again and answer **Y** when the change is the one you want. |
-| `The sign-in code expired` | Sign-in wasn't finished in time (about 15 minutes). | Run the script again. |
-| An `AADSTS…` error during sign-in | Usually the wrong `-TenantId`, or signing in with an account from a different tenant. | Check the tenant ID, and sign in with an account from that tenant. |
-| `Cannot validate argument on parameter 'Capability'` | A capability name is misspelled or outdated. | Use the exact name from the table in [Before you start](#before-you-start). |
+| `Layer 2: … already set to something other than 'allowed for all users'` | Someone limited or blocked the trust. The script won't widen it. | Check with whoever set it before changing anything. |
+| **Need admin approval** during sign-in | The account can't approve the tool's permissions itself. | Sign in as a Global Administrator. |
+| `403` / `Authorization_RequestDenied` | Not a Global Administrator, or consent was declined. | Sign in as a Global Administrator and accept the prompt. |
+| `Layer 2: skipped` or `Layer 3: skipped …` | You answered **N** (or used `-WhatIf`). | Run it again and answer **Y**. |
+| `The sign-in code expired` | Sign-in took too long (about 15 minutes). | Run it again. |
+| An `AADSTS…` error during sign-in | Usually a wrong `-TenantId`, or an account from another tenant. | Check the tenant ID and account. |
+| `Cannot validate argument on parameter 'Capability'` | Misspelled capability name. | Use a name from [Before you start](#before-you-start). |
 
 ## Step 3: Check your side
 
-In your tenant, run the read-only check with the partner's tenant ID and the capabilities you granted in Step 2:
+Run the read-only check with the capabilities you granted:
 
 ```powershell
 .\Test-XtapPartner.ps1 -TenantId <your-tenant-id> -PartnerTenantId <partner-tenant-id> `
@@ -162,46 +142,41 @@ In your tenant, run the read-only check with the partner's tenant ID and the cap
 | Expected capability | PASS for each one listed | Rerun the enable script with the missing capability in `-Capability`. |
 | Capability | INFO lines listing what's granted | Nothing to do; this is for reference. |
 
-Sign-in notes:
+Its consent prompt asks for read-only permissions; leave **Consent on behalf of your organization** unticked. If a Global Reader gets **Need admin approval**, have a Global Administrator run it.
 
-- Its consent prompt lists read-only permissions (`Policy.Read.All`, and `CrossTenantInformation.ReadBasic.All` to show partner names). Leave **Consent on behalf of your organization** unticked here too.
-- A Global Administrator can run it straight away. A Global Reader can run it only after an administrator has approved those permissions for the tool; if a Global Reader sees **Need admin approval**, have the Global Administrator run it.
-
-Fix any FAIL before moving on, and keep the CSV for the change record.
+Fix any FAIL before moving on. Keep the CSV for the change record.
 
 ## Step 4: The partner configures their side
 
-Your setup only lets the partner see *your* users. For your users to see theirs, the partner's admin does Steps 1 to 3 in *their* tenant, with *your* Tenant ID as `-PartnerTenantId`, and sends you their Step 3 CSV (or a screenshot of the output). You can't run the check against their tenant yourself.
+Your setup only lets the partner see *your* users. Their admin does Steps 1 to 3 with *your* Tenant ID as the partner, and sends you their Step 3 CSV or a screenshot.
 
 Send them:
 
 - Your Tenant ID.
 - What you granted them (capability names, and whether it's scoped to a group).
 - What you'd like them to grant you.
-- A link to this doc and the two scripts, or the [Microsoft Learn guide](https://learn.microsoft.com/en-us/exchange/sharing/migrate-to-m365-xtap) if they're outside the organization (its Part 2 covers the same calls).
+- A link to this doc and the scripts (or the [Microsoft Learn guide](https://learn.microsoft.com/en-us/exchange/sharing/migrate-to-m365-xtap) if they're outside the organization).
 
 ## Step 5: Validate
 
-Test in both directions once both sides have a clean Step 3 check. With no old configuration in the way, results reflect XTAP alone. The script checks configuration only; these Outlook tests are what prove it works for users.
+Once both Step 3 checks are clean, test in both directions. This is what proves it works for users.
 
-- **Free/Busy**: a user in your tenant creates a meeting in Outlook (desktop or web) and adds a partner user. Scheduling Assistant should show their availability at the level *their* tenant granted. Then have a partner user do the same with one of your users.
+- **Free/Busy**: add a partner user to a new meeting in Outlook. Scheduling Assistant should show their availability at the level *their* tenant granted. Then have a partner user do the same.
 - **MailTips** (if granted): address a partner user who has automatic replies turned on; the MailTip should appear before sending.
-- **Calendar Sharing** (if granted): share a calendar with a partner user and confirm they can open it at the granted level.
+- **Calendar Sharing** (if granted): share a calendar with a partner user and confirm they can open it.
 - **Group scoping** (if used): confirm a user *outside* the group shows no availability to the partner.
-- **Timing**: changes aren't always instant. If a test fails right after setup, wait and retry before troubleshooting.
+- **Timing**: changes aren't always instant; wait and retry before troubleshooting.
 
-**If a direction doesn't work**, the fix is in the tenant being looked *at*, not the one doing the looking. If your users can't see the partner, check the partner's configuration.
+**If one direction fails**, the fix is in the tenant being looked *at*: if your users can't see the partner, check the partner's side.
 
 ## Changing or removing sharing later
 
 - **Change the level**: grant the new capability (run the Step 2 script with `-Capability`), confirm it works, then remove the old one.
-- **Stop sharing with a partner** (for example after a divestiture): remove the capabilities from the partner entry, then remove its M365 Collaboration trust. Your users stay hidden from the partner as soon as the capabilities are gone, whatever the partner has configured on their side. See the [M365 cross-tenant access policy Graph API overview](https://learn.microsoft.com/en-us/graph/api/resources/m365-cross-tenant-access-policy-overview) for the update and delete calls.
+- **Stop sharing** (e.g. after a divestiture): remove the capabilities, then the M365 Collaboration trust. Your users are hidden as soon as the capabilities are gone. See the [Graph API overview](https://learn.microsoft.com/en-us/graph/api/resources/m365-cross-tenant-access-policy-overview) for the calls.
 
 ## Tenant-wide defaults (use with care)
 
-Capabilities can also be set on the **default** policy instead of a partner entry. A default capability applies to *every* Microsoft 365 organization that doesn't have its own partner entry, not just the op-cos. For sharing between op-cos, always use partner entries as above.
-
-Anonymous calendar publishing (sharing a calendar to an internet URL) can only be set on the default policy. Treat it as a separate decision with its own approval.
+A capability on the **default** policy applies to *every* Microsoft 365 organization without its own partner entry, not just the op-cos. Always use partner entries for op-co sharing. Anonymous calendar publishing can only be set on the default policy; treat it as a separate decision.
 
 ## Per-partner tracking
 
@@ -212,11 +187,11 @@ Anonymous calendar publishing (sharing a calendar to an internet URL) can only b
 
 ## Appendix: Manual PowerShell steps
 
-Use these instead of the Step 2 script only when you need something it doesn't do, such as limiting a grant to a security group, or when the script can't be run. They make the same Graph calls.
+Use these instead of the Step 2 script only for group-limited grants, or when the script can't be run.
 
-**Sign in.** Run the device-code sign-in from [Migrate Existing Sharing, Appendix](02-migrate-existing-sharing.md#sign-in), with `$tenantId` set to *your* tenant, signing in as a Global Administrator. Run everything below **in the same PowerShell window**: the sign-in sets `$headers`, which these blocks use. If you close the window or the token expires (after roughly 60 to 90 minutes), sign in again.
+**Sign in** with the [sign-in block](02-migrate-existing-sharing.md#sign-in) from Migrate Existing Sharing, with `$tenantId` set to your tenant. Run everything below in the same PowerShell window.
 
-**Turn on M365 Collaboration trust (Layer 2).** First check that it isn't already set for this partner: this PATCH replaces whatever is there, so a setting someone limited to specific users, or blocked, would silently become "all users". [Test-XtapPartner.ps1](Test-XtapPartner.ps1) shows the current value. If it's already set to anything other than all users, review it with whoever configured it first.
+**Turn on M365 Collaboration trust (Layer 2).** Check first with [Test-XtapPartner.ps1](Test-XtapPartner.ps1): this replaces the current setting, so a limited or blocked trust would silently become "all users".
 
 ```powershell
 $partnerTenantId = "<partner-tenant-id>"  # the partner you're granting access to; also used below
@@ -275,6 +250,6 @@ Then continue with [Step 3](#step-3-check-your-side).
 
 ## References
 
-- [Migrate to Microsoft 365 Cross-Tenant Access Policy for sharing Free/Busy, Calendars, and MailTips](https://learn.microsoft.com/en-us/exchange/sharing/migrate-to-m365-xtap): Microsoft Learn. Part 2 is the source for the calls and capability names used here.
-- [Microsoft 365 cross-tenant access policy Graph API overview](https://learn.microsoft.com/en-us/graph/api/resources/m365-cross-tenant-access-policy-overview): Microsoft Learn reference for the partner, capability, and default policy resources.
-- [Cross-tenant access settings (Microsoft Entra External ID)](https://learn.microsoft.com/en-us/entra/external-id/cross-tenant-access-settings-b2b-collaboration): Microsoft Learn reference for the Layer 1 B2B trust settings.
+- [Migrate to Microsoft 365 Cross-Tenant Access Policy for sharing Free/Busy, Calendars, and MailTips](https://learn.microsoft.com/en-us/exchange/sharing/migrate-to-m365-xtap) (Microsoft Learn; source for the calls and capability names)
+- [Microsoft 365 cross-tenant access policy Graph API overview](https://learn.microsoft.com/en-us/graph/api/resources/m365-cross-tenant-access-policy-overview) (Microsoft Learn)
+- [Cross-tenant access settings (Microsoft Entra External ID)](https://learn.microsoft.com/en-us/entra/external-id/cross-tenant-access-settings-b2b-collaboration) (Microsoft Learn; Layer 1)

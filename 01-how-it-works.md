@@ -1,48 +1,44 @@
 # Cross-Tenant Calendar Sharing: How It Works
 
-Read this first. It explains what's moving, why, and where each setting lives, and helps you pick the right runbook.
+Read this first. It helps you pick a runbook and explains what's changing.
 
 ## Which runbook do I need?
 
-There are two runbooks. Pick by **partner pairing**, not by project: the same op-co can need one runbook for one partner and the other for a different partner.
+Pick per **partner pairing**: the same op-co can need one runbook for one partner and the other for another.
 
 | Does either tenant already share with the other through… | Use |
 | --- | --- |
-| An Organization Relationship, a Sharing Policy rule for the partner's domain (or a wildcard `*` rule), or an Availability Address Space | [**Migrate Existing Sharing**](02-migrate-existing-sharing.md): discover what's there, set up XTAP, cut over, then clean up the old config |
-| None of those, on either side | [**Set Up New Sharing**](03-set-up-new-sharing.md): set up XTAP on both sides and test. Shorter, with no cutover or cleanup |
-| Not sure | Run the read-only discovery in [Migrate Existing Sharing, Step 1](02-migrate-existing-sharing.md#step-1-discovery). If it finds nothing for the partner, switch to Set Up New Sharing |
+| An Organization Relationship, a Sharing Policy rule for the partner's domain (or a wildcard `*` rule), or an Availability Address Space | [**Migrate Existing Sharing**](02-migrate-existing-sharing.md) |
+| None of those, on either side | [**Set Up New Sharing**](03-set-up-new-sharing.md) (shorter: no cutover or cleanup) |
+| Not sure | Run the read-only [discovery](02-migrate-existing-sharing.md#step-1-discovery). If it finds nothing for the partner, use Set Up New Sharing |
 
-Why it matters: old configuration takes precedence over XTAP. Following Set Up New Sharing while an old Organization Relationship is still active means the new setup can't be tested properly, and the old one breaks when EWS is shut off.
-
-Both runbooks use the same scripts ([Enable-XtapPartner.ps1](Enable-XtapPartner.ps1) and [Test-XtapPartner.ps1](Test-XtapPartner.ps1)) for the XTAP setup itself. The difference is what happens around it: discovery, cutover, and cleanup of the old config.
+It matters because old configuration takes precedence over XTAP: while it's active, you can't tell whether the new setup works. Both runbooks use the same two scripts; Migrate adds discovery, cutover, and cleanup.
 
 ## The short version
 
-For end users nothing changes: someone in Op-Co A schedules a meeting, adds a colleague from Op-Co B, and Scheduling Assistant shows B's availability. What changes is the plumbing underneath. The old path was **Exchange-to-Exchange over EWS, trusted by domain name**. The new path is **governed by Entra, trusted by tenant ID**, and configured as part of the same Cross-Tenant Access Policy you already use for B2B.
+For end users nothing changes: Scheduling Assistant still shows the other op-co's availability. Underneath, the old path was **Exchange-to-Exchange over EWS, trusted by domain name**. The new path is **governed by Entra, trusted by tenant ID**, as part of the Cross-Tenant Access Policy you already use for B2B.
 
 ## Before and after
 
-The old model was built entirely inside Exchange Online. Each tenant created an Organization Relationship (Free/Busy, MailTips) and/or a Sharing Policy (calendar sharing) that named the partner by SMTP domain. Requests were carried over EWS and trusted through Microsoft's federation infrastructure, which is why domain details (including the partner's `onmicrosoft.com` domain, and autodiscover) mattered.
+The old model lived inside Exchange Online: Organization Relationships (Free/Busy, MailTips) and Sharing Policies (calendar sharing) named the partner by SMTP domain, and requests went over EWS through Microsoft's federation infrastructure. That's why domain details, such as the partner's `onmicrosoft.com` domain, mattered.
 
-The new model moves the trust decision out of Exchange and into Entra. The partner is identified by Tenant ID, and whether a request is honored is decided by the partner entry in the target tenant's Cross-Tenant Access Policy.
+The new model moves the trust decision into Entra. The partner is identified by Tenant ID, and the partner entry in the target tenant's Cross-Tenant Access Policy decides whether a request is honored.
 
 ![Old vs new request path: same four hops, different trust in the middle](images/01-before-after.svg)
 
-The hop that changes is the trust in the middle: domain-matched federation over EWS gives way to a tenant-ID-keyed decision made by Entra in the tenant being asked.
-
 ## The three layers
 
-"Cross-Tenant Access Policy" is used loosely for two different things, which is the main source of confusion. The Entra B2B settings you've used for years are the bottom layer. The calendar-sharing pieces are two new layers that sit on top of the same partner entry, and neither does anything without the one below it.
+"Cross-Tenant Access Policy" is used loosely for two things, which causes most of the confusion. The Entra B2B settings you already use are the bottom layer. Calendar sharing adds two new layers on the same partner entry, and each needs the one below it.
 
 ![The three layers of a partner entry: what each is and where it's set](images/02-three-layers.svg)
 
-The grid in Entra admin center only shows Layer 1. Seeing a partner listed there as "Configured" says nothing about whether Layers 2 and 3 exist.
+The Entra admin center grid only shows Layer 1. A partner listed there as "Configured" may not have Layers 2 and 3.
 
 ## Who configures what: inbound, per tenant
 
-The new policy is **inbound only**. The settings in a tenant decide what a *partner* can read from *that* tenant. So configuration in Tenant A controls what Op-Co B sees of A, and configuration in Tenant B controls what Op-Co A sees of B. Two-way sharing means two complementary configurations, one in each tenant, and they don't have to match. A can share full detail with B while B shares availability only with A.
+The new policy is **inbound only**: a tenant's settings decide what a partner can read from *that* tenant. Tenant A's configuration controls what Op-Co B sees of A, and vice versa. Two-way sharing needs a configuration in each tenant, and they don't have to match: A can share full detail while B shares availability only.
 
-With several operating companies, think in **pairs**: every pair that shares needs a partner entry in each of the two tenants, pointing at the other.
+Think in **pairs**: every pair that shares needs a partner entry in both tenants, each pointing at the other.
 
 ![One op-co pair: each tenant's inbound policy governs what the other can read](images/03-inbound-per-tenant.svg)
 
@@ -61,7 +57,7 @@ When A's users can't see B, the fix is in Tenant B, not Tenant A.
 | `FreeBusyAccessScope` (a group) | Limited which of your users were visible | Optional security group scoping on the capability |
 | Availability Address Space (`OrgWideFBToken`) | Org-wide free/busy trust to another tenant | Covered by the same XTAP partner entry |
 
-Exact capability identifiers are in the Microsoft Learn migration guide's table; confirm them there, since the beta surface is still settling.
+Exact capability names are in each runbook's capability table.
 
 ## Where each piece lives
 
@@ -75,11 +71,11 @@ Exact capability identifiers are in the Microsoft Learn migration guide's table;
 
 ## Common misconceptions
 
-- **"We already have a cross-tenant access policy for them."** You probably have Layer 1 (B2B). That alone does not carry Free/Busy. Layers 2 and 3 are separate settings on the same partner entry.
-- **"We need their onmicrosoft.com domain."** Not anymore. Nothing in the new model is domain-based; the Tenant ID is the only identifier.
-- **"Configuring our side turns on sharing both ways."** It only controls what the partner can read from you. The partner has to configure their side for you to see them.
-- **"This touches Exchange hybrid."** It doesn't. Hybrid and on-premises free/busy follow separate guidance; this covers tenant-to-tenant sharing in Exchange Online.
-- **"Once EWS is blocked, the old settings are harmless."** They stop working, but while they're still active they take precedence over XTAP, so they hide whether the new setup works. Disable them to test the new path, and remove them after a burn-in.
+- **"We already have a cross-tenant access policy for them."** That's probably just Layer 1 (B2B), which doesn't carry Free/Busy. Layers 2 and 3 are separate.
+- **"We need their onmicrosoft.com domain."** Not anymore. The Tenant ID is the only identifier.
+- **"Configuring our side turns on sharing both ways."** It only controls what the partner can read from you. They configure their side for you to see them.
+- **"This touches Exchange hybrid."** It doesn't. This covers tenant-to-tenant sharing in Exchange Online only.
+- **"Once EWS is blocked, the old settings are harmless."** While active, they take precedence over XTAP and hide whether the new setup works. Disable them to test, and remove them after a burn-in.
 
 ## References
 
