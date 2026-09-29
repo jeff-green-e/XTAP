@@ -147,18 +147,31 @@ To preview without being asked or changing anything, add `-WhatIf`. To skip the 
 
 ## Step 3: Check your side
 
-Run the read-only check against the same partner, listing the capabilities you granted:
+In your tenant, run the read-only check with the partner's tenant ID and the capabilities you granted in Step 2:
 
 ```powershell
 .\Test-XtapPartner.ps1 -TenantId <your-tenant-id> -PartnerTenantId <partner-tenant-id> `
-    -ExpectedCapability crossTenantCalendarAvailabilityBasic
+    -ExpectedCapability crossTenantCalendarAvailabilityBasic -CsvPath .\xtap-check.csv
 ```
 
-It signs in the same way. It asks for read-only permissions (`Policy.Read.All`, plus `CrossTenantInformation.ReadBasic.All` to show partner names), so its consent prompt looks different; leave "Consent on behalf of your organization" unticked here too. A Global Administrator can run it straight away. A Global Reader can run it only after an administrator has approved these permissions for the tool, because read access to policies needs admin consent; if a Global Reader gets **Need admin approval**, have the Global Administrator run the check instead. It should show **PASS** for Partner entry, Trust settings, M365 Collab trust, and each expected capability. A WARN on Trust settings means Step 1 doesn't match the environment standard; fix it in the portal. It doesn't block calendar sharing. Fix any FAIL before moving on. Add `-CsvPath .\xtap-check.csv` to keep a copy for the change record.
+| Check | Expected | If not |
+| --- | --- | --- |
+| Partner entry | PASS | Add the partner in the portal (Step 1), then rerun the enable script (Step 2). |
+| Trust settings | PASS | WARN means the portal settings don't match the standard. Fix them in the portal (Step 1). This doesn't block calendar sharing. |
+| M365 Collab trust | PASS: "Allowed for all users." | "Not configured" or "inherited from default": rerun the enable script and answer **Y** to the M365 Collaboration trust prompt. Limited or blocked on this partner: the script won't change it; review it with whoever set it. |
+| Expected capability | PASS for each one listed | Rerun the enable script with the missing capability in `-Capability`. |
+| Capability | INFO lines listing what's granted | Nothing to do; this is for reference. |
+
+Sign-in notes:
+
+- Its consent prompt lists read-only permissions (`Policy.Read.All`, and `CrossTenantInformation.ReadBasic.All` to show partner names). Leave **Consent on behalf of your organization** unticked here too.
+- A Global Administrator can run it straight away. A Global Reader can run it only after an administrator has approved those permissions for the tool; if a Global Reader sees **Need admin approval**, have the Global Administrator run it.
+
+Fix any FAIL before moving on, and keep the CSV for the change record.
 
 ## Step 4: The partner configures their side
 
-Your setup only lets the partner see *your* users. For your users to see theirs, the partner's admin does Steps 1 to 3 in *their* tenant, with *your* Tenant ID as `-PartnerTenantId`.
+Your setup only lets the partner see *your* users. For your users to see theirs, the partner's admin does Steps 1 to 3 in *their* tenant, with *your* Tenant ID as `-PartnerTenantId`, and sends you their Step 3 CSV (or a screenshot of the output). You can't run the check against their tenant yourself.
 
 Send them:
 

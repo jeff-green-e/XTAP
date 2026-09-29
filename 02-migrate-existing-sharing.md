@@ -167,18 +167,35 @@ Partner <partner-tenant-id>, as configured in tenant <this-tenant-id>
 
 "Already on" or "already configured, no change" lines are fine; that part was set up before. Running the script again is always safe. To preview without being asked or changing anything, add `-WhatIf`; to skip the prompts, add `-Confirm:$false`. If it stops with an error, see the [error table in Set Up New Sharing](03-set-up-new-sharing.md#if-the-script-stops); the messages and fixes are the same.
 
-**Both sides must do this.** The script only configures the tenant you sign in to. For Op-Co A and Op-Co B to see each other, A's admin runs it with B as the partner, and B's admin runs it with A as the partner.
+**Both sides must do this.** The script only configures the tenant you sign in to. For Op-Co A and Op-Co B to see each other, A's admin runs it with B as the partner, and B's admin runs it with A as the partner. Step 5 is where you confirm both are done.
 
-## Step 5: Check both sides
+## Step 5: Check your side, and confirm the partner's side
 
-Before cutting over, each admin runs the read-only check in their own tenant, with the other tenant as the partner and the capabilities they granted:
+Each admin can only see their own tenant, so each one checks their own side and then you compare notes. Do this for every pairing before cutover.
+
+**1. Check your side.** In your tenant, run the read-only check with the partner's tenant ID and the capabilities you granted in Step 4:
 
 ```powershell
 .\Test-XtapPartner.ps1 -TenantId <this-tenant-id> -PartnerTenantId <partner-tenant-id> `
     -ExpectedCapability crossTenantCalendarAvailabilityBasic -CsvPath .\xtap-check.csv
 ```
 
-It signs in the same way. It asks for read-only permissions (`Policy.Read.All`, plus `CrossTenantInformation.ReadBasic.All` to show partner names), so its consent prompt looks different; leave "Consent on behalf of your organization" unticked here too. A Global Administrator can run it straight away. A Global Reader can run it only after an administrator has approved these permissions for the tool, because read access to policies needs admin consent; if a Global Reader gets **Need admin approval**, have the Global Administrator run the check instead. Expect **PASS** for Partner entry, Trust settings, M365 Collab trust, and each expected capability. A WARN on Trust settings means Step 3 doesn't match the standard; fix it in the portal, though it doesn't block calendar sharing. **Don't cut over until both sides have no FAIL results.** Keep the CSV for the change record.
+| Check | Expected | If not |
+| --- | --- | --- |
+| Partner entry | PASS | Add the partner in the portal (Step 3), then rerun the enable script. |
+| Trust settings | PASS | WARN means the portal settings don't match the standard. Fix them in the portal (Step 3). This doesn't block calendar sharing. |
+| M365 Collab trust | PASS: "Allowed for all users." | "Not configured" or "inherited from default": rerun the enable script and answer **Y** to the M365 Collaboration trust prompt. Limited or blocked on this partner: the script won't change it; review it with whoever set it. |
+| Expected capability | PASS for each one listed | Rerun the enable script with the missing capability in `-Capability`. |
+| Capability | INFO lines listing what's granted | Nothing to do; this is for reference. |
+
+Sign-in notes:
+
+- Its consent prompt lists read-only permissions (`Policy.Read.All`, and `CrossTenantInformation.ReadBasic.All` to show partner names). Leave **Consent on behalf of your organization** unticked here too.
+- A Global Administrator can run it straight away. A Global Reader can run it only after an administrator has approved those permissions for the tool; if a Global Reader sees **Need admin approval**, have the Global Administrator run it.
+
+**2. Get the partner's result.** The partner's admin does Steps 3 to 5 in *their* tenant, with *your* tenant ID as `-PartnerTenantId`, and sends you their CSV (or a screenshot of the output). You can't run the check against their tenant yourself.
+
+**3. Go / no-go.** Move to Step 6 only when **both** results have no FAIL. Keep both CSVs with the change record, and tick "Both checks clean" in the [tracking table](#per-pairing-tracking).
 
 ## Step 6: Cut over and validate
 
@@ -367,7 +384,7 @@ Invoke-RestMethod -Method Post `
     -Headers $headers -ContentType "application/json" -Body $body
 ```
 
-Then continue with [Step 5](#step-5-check-both-sides).
+Then continue with [Step 5](#step-5-check-your-side-and-confirm-the-partners-side).
 
 ## Key dates and references
 
