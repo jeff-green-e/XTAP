@@ -6,7 +6,7 @@
 
 .DESCRIPTION
     Automates the PowerShell steps of the runbooks in this repo:
-      - 02-migrate-existing-sharing.md, Steps 2 to 4 (moving existing sharing off EWS)
+      - 02-migrate-existing-sharing.md, Step 4 (moving existing sharing off EWS; manual steps in its appendix)
       - 03-set-up-new-sharing.md,       Step 2 (sharing with a new partner; manual steps in its appendix)
     Follow the runbook; this script doesn't replace it.
     The manual PowerShell snippets in 02 and 03 mirror this script. If you change the

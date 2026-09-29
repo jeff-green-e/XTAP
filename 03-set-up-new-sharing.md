@@ -182,7 +182,7 @@ Anonymous calendar publishing (sharing a calendar to an internet URL) can only b
 
 Use these instead of the Step 2 script only when you need something it doesn't do, such as limiting a grant to a security group, or when the script can't be run. They make the same Graph calls.
 
-**Sign in.** Run the device-code sign-in from [Migrate Existing Sharing, Step 2](02-migrate-existing-sharing.md#step-2-prerequisites-and-sign-in), with `$tenantId` set to *your* tenant, signing in as a Global Administrator. Run everything below **in the same PowerShell window**: the sign-in sets `$headers`, which these blocks use. If you close the window or the token expires (after roughly 60 to 90 minutes), sign in again.
+**Sign in.** Run the device-code sign-in from [Migrate Existing Sharing, Appendix](02-migrate-existing-sharing.md#sign-in), with `$tenantId` set to *your* tenant, signing in as a Global Administrator. Run everything below **in the same PowerShell window**: the sign-in sets `$headers`, which these blocks use. If you close the window or the token expires (after roughly 60 to 90 minutes), sign in again.
 
 **Turn on M365 Collaboration trust (Layer 2).** First check that it isn't already set for this partner: this PATCH replaces whatever is there, so a setting someone limited to specific users, or blocked, would silently become "all users". [Test-XtapPartner.ps1](Test-XtapPartner.ps1) shows the current value. If it's already set to anything other than all users, review it with whoever configured it first.
 
