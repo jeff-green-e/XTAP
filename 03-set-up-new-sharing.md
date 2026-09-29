@@ -61,13 +61,28 @@ Layers 2 and 3 have no portal UI yet, so this step uses [Enable-XtapPartner.ps1]
 
 ### Get ready
 
-- **The script**: download `Enable-XtapPartner.ps1` and `Test-XtapPartner.ps1` from this repo into one folder. If Windows blocks a downloaded file, run `Unblock-File .\Enable-XtapPartner.ps1` (and the same for the test script).
+- **The scripts**: download `Enable-XtapPartner.ps1` and `Test-XtapPartner.ps1` from this repo into one folder. Downloaded scripts are usually blocked; [unblock them](#unblock-the-downloaded-scripts) before running.
 - **PowerShell**: PowerShell 7 (Windows PowerShell 5.1 should also work), in a normal (not elevated) window, opened in that folder. No modules to install. If the execution policy stops the script, run `Set-ExecutionPolicy -Scope Process Bypass`; that only affects this window.
 - **Values**:
   - `-TenantId`: *your* tenant ID, the tenant whose users the partner will see.
   - `-PartnerTenantId`: the partner's tenant ID.
   - `-Capability`: only if you're granting more than Free/Busy times. Use the exact names from the table in [Before you start](#before-you-start), separated by commas.
 - **A browser** where you can sign in as a Global Administrator of your tenant.
+
+### Unblock the downloaded scripts
+
+Windows marks files downloaded through a browser as coming from the internet, and PowerShell won't run them until they're unblocked. A blocked script fails with an error like *"Enable-XtapPartner.ps1 cannot be loaded. The file … is not digitally signed. You cannot run this script on the current system."* Unblock both scripts once after downloading, either way:
+
+- **File Explorer**: right-click the file → **Properties** → **General** tab → tick **Unblock** → **OK**. If there's no Unblock checkbox, the file isn't blocked.
+- **PowerShell**, in the folder with the scripts:
+
+  ```powershell
+  Unblock-File -Path .\Enable-XtapPartner.ps1, .\Test-XtapPartner.ps1
+  ```
+
+![File Properties dialog for Enable-XtapPartner.ps1, with the Unblock checkbox ticked next to "This file came from another computer and might be blocked to help protect this computer"](images/04-unblock-script.png)
+
+Files you get with `git clone` aren't marked, so they don't need unblocking.
 
 ### Dry run
 
@@ -119,6 +134,8 @@ Partner <partner-tenant-id>, as configured in tenant <your-tenant-id>
 
 | Message | What it means | What to do |
 | --- | --- | --- |
+| `… is not digitally signed. You cannot run this script on the current system.` | The downloaded script is still blocked. | [Unblock it](#unblock-the-downloaded-scripts) and run it again. |
+| `… cannot be loaded because running scripts is disabled on this system.` | The PowerShell execution policy doesn't allow scripts. | Run `Set-ExecutionPolicy -Scope Process Bypass` (this window only) and run it again. |
 | `No cross-tenant access entry for partner …` | The partner isn't under Organizational settings. | Add it in the portal ([Step 1](#step-1-verify-the-partner-organization-in-entra-admin-center-layer-1)), then run the script again. |
 | `Layer 2: M365 Collaboration trust for this partner is already set to something other than 'allowed for all users'` | Someone has limited or blocked the trust for this partner. The script won't widen it. | Find out who set it and why before changing anything. The message shows the current setting. |
 | `403` / `Authorization_RequestDenied` | The account isn't a Global Administrator, or the consent prompt was declined. | Sign in with a Global Administrator account and accept the consent prompt. |

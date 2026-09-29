@@ -75,8 +75,23 @@ Check these before changing anything:
   - Global Reader or higher for the configuration check (Step 5).
   - Organization Management in Exchange Online to turn off and remove old configuration (Steps 6 and 7).
 - **Partner tenant IDs**: collect the Entra Tenant ID for every op-co that will be part of a sharing pair. Each op-co admin can find their own in Entra admin center → Identity → Overview → Tenant ID. Add these to the [pairings table](#per-pairing-tracking) before starting, since every pairing needs the *other* tenant's ID.
-- **The scripts**: download [Enable-XtapPartner.ps1](Enable-XtapPartner.ps1) and [Test-XtapPartner.ps1](Test-XtapPartner.ps1) from this repo into one folder. If Windows blocks a downloaded file, run `Unblock-File` on it. Use PowerShell 7 (Windows PowerShell 5.1 should also work) in a normal window opened in that folder; no modules to install. If the execution policy stops a script, `Set-ExecutionPolicy -Scope Process Bypass` allows it for that window only.
+- **The scripts**: download [Enable-XtapPartner.ps1](Enable-XtapPartner.ps1) and [Test-XtapPartner.ps1](Test-XtapPartner.ps1) from this repo into one folder. Downloaded scripts are usually blocked; [unblock them](#unblock-the-downloaded-scripts) before running. Use PowerShell 7 (Windows PowerShell 5.1 should also work) in a normal window opened in that folder; no modules to install. If the execution policy stops a script, `Set-ExecutionPolicy -Scope Process Bypass` allows it for that window only.
 - **No domain federation involved: this is a deliberate change from EWS.** The old EWS-based Free/Busy setup relied on domain-based federation (Microsoft Federation Gateway), which sometimes required a partner's `*.onmicrosoft.com` default domain to be present in the trust chain even after mailboxes were fully online. XTAP has no equivalent: every partner relationship (Layer 1 B2B and Layer 2/3 M365 Collaboration) is keyed purely on the partner's **Entra Tenant ID (GUID)**; there's no `DomainNames` parameter anywhere in the XTAP object model. Don't chase down onmicrosoft.com domains for this migration; the Tenant ID is the only identifier needed per op-co.
+
+### Unblock the downloaded scripts
+
+Windows marks files downloaded through a browser as coming from the internet, and PowerShell won't run them until they're unblocked. A blocked script fails with an error like *"Enable-XtapPartner.ps1 cannot be loaded. The file … is not digitally signed. You cannot run this script on the current system."* Unblock both scripts once after downloading, either way:
+
+- **File Explorer**: right-click the file → **Properties** → **General** tab → tick **Unblock** → **OK**. If there's no Unblock checkbox, the file isn't blocked.
+- **PowerShell**, in the folder with the scripts:
+
+  ```powershell
+  Unblock-File -Path .\Enable-XtapPartner.ps1, .\Test-XtapPartner.ps1
+  ```
+
+![File Properties dialog for Enable-XtapPartner.ps1, with the Unblock checkbox ticked next to "This file came from another computer and might be blocked to help protect this computer"](images/04-unblock-script.png)
+
+Files you get with `git clone` aren't marked, so they don't need unblocking.
 
 ## Step 3: Verify the partner organization in Entra admin center (Layer 1)
 

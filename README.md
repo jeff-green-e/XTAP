@@ -12,4 +12,4 @@ Moving cross-tenant Free/Busy, MailTips, and Calendar Sharing between operating-
 
 The manual PowerShell snippets in 02 and 03 mirror the two scripts. If you change one, update the other.
 
-Diagrams are standalone SVG files in `images/` and render in both GitHub and Azure DevOps.
+Diagrams are standalone SVG files in `images/` and render in both GitHub and Azure DevOps; `images/` also holds one screenshot (PNG) of unblocking a downloaded script.
