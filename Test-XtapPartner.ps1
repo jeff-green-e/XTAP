@@ -38,9 +38,7 @@
 
 .PARAMETER CsvPath
     Also write the results to this CSV file (e.g. to attach to a change ticket).
-
-.PARAMETER PassThru
-    Also return the results as objects, for filtering or further scripting.
+    Columns: PartnerTenantId, PartnerName, Check, Status (PASS/WARN/FAIL/INFO), Detail.
 
 .EXAMPLE
     # Every partner in the tenant
@@ -50,9 +48,6 @@
     # One partner, and fail if Free/Busy basic or all MailTips isn't granted
     .\Test-XtapPartner.ps1 -TenantId <your-tenant-id> -PartnerTenantId <partner-tenant-id> `
         -ExpectedCapability crossTenantCalendarAvailabilityBasic, crossTenantMailTipsAll -CsvPath .\xtap-check.csv
-
-.OUTPUTS
-    With -PassThru, one object per check: PartnerTenantId, PartnerName, Check, Status (PASS/WARN/FAIL/INFO), Detail.
 
 .LINK
     https://learn.microsoft.com/en-us/exchange/sharing/migrate-to-m365-xtap
@@ -75,9 +70,7 @@ param(
     )]
     [string[]] $ExpectedCapability,
 
-    [string] $CsvPath,
-
-    [switch] $PassThru
+    [string] $CsvPath
 )
 
 $ErrorActionPreference = 'Stop'
@@ -308,5 +301,3 @@ if ($CsvPath) {
     $results | Export-Csv -Path $CsvPath -NoTypeInformation -Encoding UTF8
     Write-Host "Results written to $CsvPath" -ForegroundColor Cyan
 }
-
-if ($PassThru) { $results }
