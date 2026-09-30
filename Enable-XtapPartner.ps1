@@ -21,8 +21,13 @@
       - Limit a grant to a security group. It always grants to all users; for group
         scoping, use the manual capability step in the runbook.
 
-    Signs in with device-code flow as you (Global Administrator), using Microsoft's
-    first-party Graph Command Line Tools client. No app registration or secret.
+    Requires the Microsoft.Graph.Authentication module. Signs in as you (Global
+    Administrator) with Connect-MgGraph, using Microsoft's Graph Command Line Tools
+    client; no app registration or secret. If this PowerShell window is already signed in
+    to the same tenant with the needed permissions, that sign-in is reused. Otherwise an
+    account picker or browser opens (or a device code with -UseDeviceCode). Run
+    Disconnect-MgGraph when you're finished, especially on a shared machine.
+
     Before each change it shows what it's about to do and asks you to confirm (Y/N).
     Nothing is asked when everything is already set. Re-running is safe: settings that
     already exist are left alone, so you can run it again later to add another capability.
@@ -38,18 +43,22 @@
     (free/busy times only, the Scheduling Assistant case). Names come from the Microsoft
     Learn migration guide and are case-sensitive.
 
+.PARAMETER UseDeviceCode
+    Sign in with a device code instead of an account picker or browser window. Use this
+    when there's no usable browser, such as a remote session.
+
 .EXAMPLE
     # Free/busy times only (the default)
     .\Enable-XtapPartner.ps1 -TenantId <your-tenant-id> -PartnerTenantId <partner-tenant-id>
 
 .EXAMPLE
-    # Free/busy and all MailTips, in one sign-in
+    # Free/busy and all MailTips, in one run
     .\Enable-XtapPartner.ps1 -TenantId <your-tenant-id> -PartnerTenantId <partner-tenant-id> `
         -Capability crossTenantCalendarAvailabilityBasic, crossTenantMailTipsAll
 
 .EXAMPLE
-    # Also print the raw Graph responses at the end, for troubleshooting
-    .\Enable-XtapPartner.ps1 -TenantId <id> -PartnerTenantId <id> -Verbose
+    # No browser available
+    .\Enable-XtapPartner.ps1 -TenantId <id> -PartnerTenantId <id> -UseDeviceCode
 
 .EXAMPLE
     # Preview only: show what would change without asking or changing anything
@@ -58,6 +67,10 @@
 .EXAMPLE
     # No confirmation prompts (e.g. when scripting several partners)
     .\Enable-XtapPartner.ps1 -TenantId <id> -PartnerTenantId <id> -Confirm:$false
+
+.EXAMPLE
+    # Also print the raw Graph responses at the end, for troubleshooting
+    .\Enable-XtapPartner.ps1 -TenantId <id> -PartnerTenantId <id> -Verbose
 
 .LINK
     https://learn.microsoft.com/en-us/exchange/sharing/migrate-to-m365-xtap
@@ -80,7 +93,9 @@ param(
         'crossTenantCalendarSharingFreeBusyDetail',
         'crossTenantCalendarSharingFreeBusyReviewer'
     )]
-    [string[]] $Capability = 'crossTenantCalendarAvailabilityBasic'
+    [string[]] $Capability = 'crossTenantCalendarAvailabilityBasic',
+
+    [switch] $UseDeviceCode
 )
 
 $ErrorActionPreference = 'Stop'
@@ -89,11 +104,16 @@ if ($TenantId -eq $PartnerTenantId) {
     throw "TenantId and PartnerTenantId are the same. PartnerTenantId must be the OTHER tenant."
 }
 
-$graphBase  = "https://graph.microsoft.com/beta/policies/crossTenantAccessPolicy/partners/$PartnerTenantId"
-$jsonParams = @{ ContentType = "application/json" }
+$graphBase = "https://graph.microsoft.com/beta/policies/crossTenantAccessPolicy/partners/$PartnerTenantId"
 
-function Get-GraphErrorCode($errorRecord) {
-    try { return ($errorRecord.ErrorDetails.Message | ConvertFrom-Json).error } catch { return $null }
+function Get-StatusCode($errorRecord) {
+    try { return [int]$errorRecord.Exception.Response.StatusCode } catch { return $null }
+}
+
+function Invoke-Graph([string] $Method, [string] $Uri, [string] $Body) {
+    $params = @{ Method = $Method; Uri = $Uri; OutputType = 'PSObject' }
+    if ($Body) { $params.Body = $Body; $params.ContentType = 'application/json' }
+    Invoke-MgGraphRequest @params
 }
 
 function Format-Capability($c) {
@@ -105,52 +125,40 @@ function Format-Capability($c) {
     return "${name}: allowed for $(if ($who) { $who -join ', ' } else { 'nobody' })"
 }
 
-# --- Sign in (device-code flow) ------------------------------------------------------------
+# --- Sign in (Connect-MgGraph) -------------------------------------------------------------
 
-$clientId = "14d82eec-204b-4c2f-b7e8-296a70dab67e"  # Microsoft Graph Command Line Tools (Microsoft first-party public client)
-$scope    = "https://graph.microsoft.com/Policy.ReadWrite.CrossTenantAccess https://graph.microsoft.com/Policy.ReadWrite.CrossTenantCapability"
+if (-not (Get-Module -ListAvailable -Name Microsoft.Graph.Authentication)) {
+    throw ("The Microsoft.Graph.Authentication module isn't installed. Install it with:`n" +
+           "  Install-Module Microsoft.Graph.Authentication -Scope CurrentUser`nthen run this again.")
+}
+Import-Module Microsoft.Graph.Authentication
 
-$deviceCode = Invoke-RestMethod -Method Post `
-    -Uri "https://login.microsoftonline.com/$TenantId/oauth2/v2.0/devicecode" `
-    -Body @{ client_id = $clientId; scope = $scope }
+$scopes  = @('Policy.ReadWrite.CrossTenantAccess', 'Policy.ReadWrite.CrossTenantCapability')
+$context = Get-MgContext
+$reuse   = $context -and $context.TenantId -eq "$TenantId" -and
+           -not ($scopes | Where-Object { $context.Scopes -notcontains $_ })
 
-Write-Host $deviceCode.message -ForegroundColor Yellow
-Write-Host "Sign in as a Global Administrator of tenant $TenantId. Leave 'Consent on behalf of your organization' unticked." -ForegroundColor Yellow
-
-$interval = [int]$deviceCode.interval
-$deadline = (Get-Date).AddSeconds([int]$deviceCode.expires_in)
-$token    = $null
-
-while (-not $token) {
-    if ((Get-Date) -gt $deadline) { throw "The sign-in code expired. Run the script again." }
-    Start-Sleep -Seconds $interval
-    try {
-        $token = Invoke-RestMethod -Method Post `
-            -Uri "https://login.microsoftonline.com/$TenantId/oauth2/v2.0/token" `
-            -Body @{
-                grant_type  = "urn:ietf:params:oauth:grant-type:device_code"
-                client_id   = $clientId
-                device_code = $deviceCode.device_code
-            }
-    } catch {
-        $err = $_
-        switch (Get-GraphErrorCode $err) {
-            'authorization_pending' { }                  # not signed in yet; keep waiting
-            'slow_down'             { $interval += 5 }   # server asked us to poll less often
-            default                 { throw $err }       # declined, expired, wrong tenant, etc.
-        }
-    }
+if (-not $reuse) {
+    Write-Host "Sign in as a Global Administrator of tenant $TenantId. If asked for consent, leave 'Consent on behalf of your organization' unticked." -ForegroundColor Yellow
+    $connect = @{ TenantId = "$TenantId"; Scopes = $scopes; NoWelcome = $true }
+    if ($UseDeviceCode) { $connect.UseDeviceCode = $true }
+    Connect-MgGraph @connect
+    $context = Get-MgContext
 }
 
-$headers = @{ Authorization = "Bearer $($token.access_token)" }
-Write-Host "Signed in." -ForegroundColor Green
+# Cached sign-ins make it easy to land in the wrong tenant; check before changing anything
+if (-not $context -or $context.TenantId -ne "$TenantId") {
+    throw ("Signed in to tenant $($context.TenantId), not $TenantId. Run Disconnect-MgGraph, then run " +
+           "this again and sign in with an account from tenant $TenantId.")
+}
+Write-Host "Signed in as $($context.Account) to tenant $TenantId." -ForegroundColor Green
 
 # --- Check the partner entry exists (Layer 1 is managed in the portal) ---------------------
 
 try {
-    $partner = Invoke-RestMethod -Method Get -Uri $graphBase -Headers $headers
+    $partner = Invoke-Graph GET $graphBase
 } catch {
-    if ([int]$_.Exception.Response.StatusCode -eq 404) {
+    if ((Get-StatusCode $_) -eq 404) {
         throw ("No cross-tenant access entry for partner $PartnerTenantId. Add the organization in " +
                "Entra admin center > Identity > External Identities > Cross-tenant access settings > " +
                "Organizational settings, then run this again.")
@@ -160,7 +168,7 @@ try {
 
 # --- Layer 2: M365 Collaboration trust -----------------------------------------------------
 
-$current   = $partner.m365CollaborationInbound.users
+$current    = $partner.m365CollaborationInbound.users
 $allUsersOn = $current.accessType -eq 'allowed' -and
               ($current.targets | Where-Object { $_.target -eq 'AllUsers' })
 
@@ -183,7 +191,7 @@ if ($allUsersOn) {
     } | ConvertTo-Json -Depth 6
 
     if ($PSCmdlet.ShouldProcess("partner $PartnerTenantId", "Turn on M365 Collaboration trust for all users")) {
-        Invoke-RestMethod -Method Patch -Uri $graphBase -Headers $headers -Body $body @jsonParams | Out-Null
+        Invoke-Graph PATCH $graphBase $body | Out-Null
         Write-Host "Layer 2: M365 Collaboration trust turned on." -ForegroundColor Green
     } else {
         Write-Host "Layer 2: skipped, not changed. Capabilities have no effect until it's on." -ForegroundColor Yellow
@@ -192,7 +200,7 @@ if ($allUsersOn) {
 
 # --- Layer 3: grant the capabilities -------------------------------------------------------
 
-$existingCaps = (Invoke-RestMethod -Method Get -Uri "$graphBase/m365Capabilities" -Headers $headers).value
+$existingCaps = (Invoke-Graph GET "$graphBase/m365Capabilities").value
 
 foreach ($cap in $Capability | Select-Object -Unique) {
     $odataType = "#microsoft.graph.$cap"
@@ -218,7 +226,7 @@ foreach ($cap in $Capability | Select-Object -Unique) {
     } | ConvertTo-Json -Depth 6
 
     if ($PSCmdlet.ShouldProcess("partner $PartnerTenantId", "Grant $cap (all users)")) {
-        Invoke-RestMethod -Method Post -Uri "$graphBase/m365Capabilities" -Headers $headers -Body $body @jsonParams | Out-Null
+        Invoke-Graph POST "$graphBase/m365Capabilities" $body | Out-Null
         Write-Host "Layer 3: granted $cap to partner (all users)." -ForegroundColor Green
     } else {
         Write-Host "Layer 3: skipped $cap, not changed." -ForegroundColor Yellow
@@ -227,8 +235,8 @@ foreach ($cap in $Capability | Select-Object -Unique) {
 
 # --- Show the result -----------------------------------------------------------------------
 
-$partner = Invoke-RestMethod -Method Get -Uri $graphBase -Headers $headers
-$caps    = (Invoke-RestMethod -Method Get -Uri "$graphBase/m365Capabilities" -Headers $headers).value
+$partner = Invoke-Graph GET $graphBase
+$caps    = (Invoke-Graph GET "$graphBase/m365Capabilities").value
 
 $collab = $partner.m365CollaborationInbound.users
 $collabText = if ($collab.accessType) {

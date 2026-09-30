@@ -18,13 +18,13 @@
     Availability Address Spaces) and doesn't prove Free/Busy works for users. Use the Outlook
     tests in the runbook for that (02 Step 6 / 03 Step 5).
 
-    The sign-in block is shared with Enable-XtapPartner.ps1 and the 02 runbook; keep
-    them in step.
-
-    Signs in with device-code flow as you, using Microsoft's first-party Graph Command Line
-    Tools client. A Global Administrator can run it directly. Global Reader or Security
-    Reader works once an admin has approved its read permissions (Policy.Read.All needs
-    admin consent); otherwise sign-in shows "Need admin approval".
+    Requires the Microsoft.Graph.Authentication module. Signs in with Connect-MgGraph, the
+    same way as Enable-XtapPartner.ps1 (keep the two sign-in blocks in step). If this window
+    is already signed in to the same tenant, for example by Enable-XtapPartner.ps1, that
+    sign-in is reused. Otherwise it asks for read-only permissions: a Global Administrator
+    can approve them directly; a Global Reader or Security Reader can run it once an admin
+    has approved them (Policy.Read.All needs admin consent), otherwise sign-in shows
+    "Need admin approval".
 
 .PARAMETER TenantId
     The tenant to check.
@@ -39,6 +39,9 @@
 .PARAMETER CsvPath
     Also write the results to this CSV file (e.g. to attach to a change ticket).
     Columns: PartnerTenantId, PartnerName, Check, Status (PASS/WARN/FAIL/INFO), Detail.
+
+.PARAMETER UseDeviceCode
+    Sign in with a device code instead of an account picker or browser window.
 
 .EXAMPLE
     # Every partner in the tenant
@@ -70,7 +73,9 @@ param(
     )]
     [string[]] $ExpectedCapability,
 
-    [string] $CsvPath
+    [string] $CsvPath,
+
+    [switch] $UseDeviceCode
 )
 
 $ErrorActionPreference = 'Stop'
@@ -84,53 +89,44 @@ if ($PartnerTenantId -and $PartnerTenantId -eq $TenantId) {
 
 $policyBase = "https://graph.microsoft.com/beta/policies/crossTenantAccessPolicy"
 
-function Get-GraphErrorCode($errorRecord) {
-    try { return ($errorRecord.ErrorDetails.Message | ConvertFrom-Json).error } catch { return $null }
-}
-
 function Get-StatusCode($errorRecord) {
     try { return [int]$errorRecord.Exception.Response.StatusCode } catch { return $null }
 }
 
-# --- Sign in (device-code flow) ------------------------------------------------------------
-
-$clientId = "14d82eec-204b-4c2f-b7e8-296a70dab67e"  # Microsoft Graph Command Line Tools (Microsoft first-party public client)
-$scope    = "https://graph.microsoft.com/Policy.Read.All https://graph.microsoft.com/CrossTenantInformation.ReadBasic.All"
-
-$deviceCode = Invoke-RestMethod -Method Post `
-    -Uri "https://login.microsoftonline.com/$TenantId/oauth2/v2.0/devicecode" `
-    -Body @{ client_id = $clientId; scope = $scope }
-
-Write-Host $deviceCode.message -ForegroundColor Yellow
-Write-Host "Sign in with an account that can read policies in tenant $TenantId. Leave 'Consent on behalf of your organization' unticked." -ForegroundColor Yellow
-
-$interval = [int]$deviceCode.interval
-$deadline = (Get-Date).AddSeconds([int]$deviceCode.expires_in)
-$token    = $null
-
-while (-not $token) {
-    if ((Get-Date) -gt $deadline) { throw "The sign-in code expired. Run the script again." }
-    Start-Sleep -Seconds $interval
-    try {
-        $token = Invoke-RestMethod -Method Post `
-            -Uri "https://login.microsoftonline.com/$TenantId/oauth2/v2.0/token" `
-            -Body @{
-                grant_type  = "urn:ietf:params:oauth:grant-type:device_code"
-                client_id   = $clientId
-                device_code = $deviceCode.device_code
-            }
-    } catch {
-        $err = $_
-        switch (Get-GraphErrorCode $err) {
-            'authorization_pending' { }                  # not signed in yet; keep waiting
-            'slow_down'             { $interval += 5 }   # server asked us to poll less often
-            default                 { throw $err }       # declined, expired, wrong tenant, etc.
-        }
-    }
+function Invoke-Graph([string] $Uri) {
+    Invoke-MgGraphRequest -Method GET -Uri $Uri -OutputType PSObject
 }
 
-$headers = @{ Authorization = "Bearer $($token.access_token)" }
-Write-Host "Signed in. Checking..." -ForegroundColor Green
+# --- Sign in (Connect-MgGraph) -------------------------------------------------------------
+
+if (-not (Get-Module -ListAvailable -Name Microsoft.Graph.Authentication)) {
+    throw ("The Microsoft.Graph.Authentication module isn't installed. Install it with:`n" +
+           "  Install-Module Microsoft.Graph.Authentication -Scope CurrentUser`nthen run this again.")
+}
+Import-Module Microsoft.Graph.Authentication
+
+# Read-only scopes; an existing sign-in with the enable script's read/write scopes is also enough
+# (partner names then may not resolve, which is only cosmetic).
+$scopes   = @('Policy.Read.All', 'CrossTenantInformation.ReadBasic.All')
+$writeSet = @('Policy.ReadWrite.CrossTenantAccess', 'Policy.ReadWrite.CrossTenantCapability')
+$context  = Get-MgContext
+$hasAll   = { param($need) -not ($need | Where-Object { $context.Scopes -notcontains $_ }) }
+$reuse    = $context -and $context.TenantId -eq "$TenantId" -and
+            ((& $hasAll $scopes) -or (& $hasAll $writeSet))
+
+if (-not $reuse) {
+    Write-Host "Sign in with an account that can read policies in tenant $TenantId. If asked for consent, leave 'Consent on behalf of your organization' unticked." -ForegroundColor Yellow
+    $connect = @{ TenantId = "$TenantId"; Scopes = $scopes; NoWelcome = $true }
+    if ($UseDeviceCode) { $connect.UseDeviceCode = $true }
+    Connect-MgGraph @connect
+    $context = Get-MgContext
+}
+
+if (-not $context -or $context.TenantId -ne "$TenantId") {
+    throw ("Signed in to tenant $($context.TenantId), not $TenantId. Run Disconnect-MgGraph, then run " +
+           "this again and sign in with an account from tenant $TenantId.")
+}
+Write-Host "Signed in as $($context.Account) to tenant $TenantId. Checking..." -ForegroundColor Green
 
 # --- Helpers -------------------------------------------------------------------------------
 
@@ -138,7 +134,7 @@ function Invoke-GraphGetAll([string] $uri) {
     # Follows @odata.nextLink so large tenants aren't truncated
     $items = @()
     while ($uri) {
-        $page  = Invoke-RestMethod -Method Get -Uri $uri -Headers $headers
+        $page  = Invoke-Graph $uri
         $items += $page.value
         $uri   = $page.'@odata.nextLink'
     }
@@ -147,8 +143,7 @@ function Invoke-GraphGetAll([string] $uri) {
 
 function Get-TenantName([guid] $id) {
     try {
-        $info = Invoke-RestMethod -Method Get -Headers $headers `
-            -Uri "https://graph.microsoft.com/v1.0/tenantRelationships/findTenantInformationByTenantId(tenantId='$id')"
+        $info = Invoke-Graph "https://graph.microsoft.com/v1.0/tenantRelationships/findTenantInformationByTenantId(tenantId='$id')"
         return $info.displayName
     } catch {
         return ""   # name lookup is a convenience; don't fail the check over it
@@ -179,13 +174,13 @@ function Format-Scope($resourceScopes) {
 
 # --- Tenant-wide defaults (partners inherit these where they have no setting of their own) --
 
-$default = Invoke-RestMethod -Method Get -Uri "$policyBase/default" -Headers $headers
+$default = Invoke-Graph "$policyBase/default"
 
 # --- Which partners to check ---------------------------------------------------------------
 
 if ($PartnerTenantId) {
     try {
-        $partners = @(Invoke-RestMethod -Method Get -Uri "$policyBase/partners/$PartnerTenantId" -Headers $headers)
+        $partners = @(Invoke-Graph "$policyBase/partners/$PartnerTenantId")
     } catch {
         if ((Get-StatusCode $_) -ne 404) { throw }
         $partners = @()

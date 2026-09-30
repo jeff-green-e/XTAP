@@ -64,6 +64,7 @@ Record, per op-co, which partners it shares with, how, and at what level. You'll
   - Steps 6 and 7 (old config): Exchange Organization Management.
 - **Tenant IDs** for every op-co in a pairing (Entra admin center → Identity → Overview → Tenant ID). Record them in the [pairings table](#per-pairing-tracking).
 - **The scripts**: download [Enable-XtapPartner.ps1](Enable-XtapPartner.ps1) and [Test-XtapPartner.ps1](Test-XtapPartner.ps1) into one folder and [unblock them](#unblock-the-downloaded-scripts). Run them from PowerShell 7 (5.1 should also work) opened in that folder. If the execution policy blocks them, run `Set-ExecutionPolicy -Scope Process Bypass` (this window only).
+- **Microsoft.Graph.Authentication** PowerShell module. Most admins already have it; the scripts check and tell you if it's missing (`Install-Module Microsoft.Graph.Authentication -Scope CurrentUser`).
 - **No domains needed.** Unlike EWS federation, XTAP identifies partners only by **Tenant ID**. Don't chase down `onmicrosoft.com` domains.
 
 ### Unblock the downloaded scripts
@@ -118,7 +119,7 @@ Match what Step 1 found. Names are case-sensitive.
     -Capability crossTenantCalendarAvailabilityLimitedDetails, crossTenantMailTipsAll
 ```
 
-1. **Sign in.** Open the URL the script prints, enter the code, and sign in as a Global Administrator of **this** tenant.
+1. **Sign in.** An account picker or browser window opens; choose a Global Administrator account for **this** tenant. If this PowerShell window is already signed in to that tenant (for example from an earlier run), the script reuses it and doesn't ask. No usable browser, such as in a remote session? Add `-UseDeviceCode` and follow the code prompt instead.
 2. **Consent (first time per tenant).** Microsoft shows a **Permissions requested** prompt for Microsoft Graph Command Line Tools. The first two lines are what the script needs; the others are standard sign-in permissions. **Leave "Consent on behalf of your organization" unticked**, then select **Accept**.
 
    ![Permissions requested prompt for Microsoft Graph Command Line Tools, listing cross tenant access policies, M365 cross tenant access capabilities, basic profile, and maintain access, with the "Consent on behalf of your organization" checkbox unticked](images/05-consent-prompt.png)
@@ -144,7 +145,7 @@ Partner <partner-tenant-id>, as configured in tenant <this-tenant-id>
   Capability: crossTenantCalendarAvailabilityBasic: allowed for all users
 ```
 
-"Already on" or "no change" lines are fine, and rerunning is always safe. `-WhatIf` previews without changing anything; `-Confirm:$false` skips the prompts. For errors, see [If the script stops](03-set-up-new-sharing.md#if-the-script-stops).
+"Already on" or "no change" lines are fine, and rerunning is always safe. `-WhatIf` previews without changing anything; `-Confirm:$false` skips the prompts. For errors, see [If the script stops](03-set-up-new-sharing.md#if-the-script-stops). When you're finished, especially on a shared machine, run `Disconnect-MgGraph` to sign out.
 
 **Both sides must do this:** A's admin runs it with B as the partner, and B's admin with A.
 
@@ -166,7 +167,7 @@ Each admin can only check their own tenant, so each checks their side and you co
 | Expected capability | PASS for each one listed | Rerun the enable script with the missing capability in `-Capability`. |
 | Capability | INFO lines listing what's granted | Nothing to do; this is for reference. |
 
-Its consent prompt asks for read-only permissions; leave **Consent on behalf of your organization** unticked. If a Global Reader gets **Need admin approval**, have a Global Administrator run it.
+If the same window is still signed in from the enable script, the check reuses that sign-in. Otherwise it asks for read-only permissions; leave **Consent on behalf of your organization** unticked. If a Global Reader gets **Need admin approval**, have a Global Administrator run it.
 
 **2. Get the partner's result.** Their admin does Steps 3 to 5 with *your* tenant ID as the partner and sends you their CSV or a screenshot.
 
@@ -257,55 +258,15 @@ Use these instead of the Step 4 script only for group-limited grants, or when th
 
 ### Sign in
 
-Signs in as you through Microsoft's Graph Command Line Tools client; no app registration needed. Run everything below **in the same PowerShell window**, since the sign-in sets `$headers`. The token lasts roughly 60 to 90 minutes; sign in again after that or in a new window.
+Same sign-in as the scripts (account picker or browser; add `-UseDeviceCode` if there's no browser). Run everything below in the same PowerShell window.
 
 ```powershell
-# Delegated auth via device-code flow: signs in as YOU, no app
-# registration, certificate, or secret required.
 $tenantId = "<your-tenant-id>"  # the op-co tenant you are configuring right now
-$clientId = "14d82eec-204b-4c2f-b7e8-296a70dab67e"  # Microsoft Graph Command Line Tools (Microsoft first-party public client)
-$scope    = "https://graph.microsoft.com/Policy.ReadWrite.CrossTenantAccess https://graph.microsoft.com/Policy.ReadWrite.CrossTenantCapability"
-
-$deviceCodeResponse = Invoke-RestMethod -Method Post `
-    -Uri "https://login.microsoftonline.com/$tenantId/oauth2/v2.0/devicecode" `
-    -Body @{ client_id = $clientId; scope = $scope }
-
-Write-Host $deviceCodeResponse.message
-# "To sign in, use a web browser to open https://microsoft.com/devicelogin
-#  and enter the code XXXXXXXXX." Do that now, signing in as a
-#  Global Administrator of this tenant.
-
-$interval = [int]$deviceCodeResponse.interval
-$deadline = (Get-Date).AddSeconds([int]$deviceCodeResponse.expires_in)
-$token    = $null
-
-while (-not $token) {
-    if ((Get-Date) -gt $deadline) { throw "The sign-in code expired. Run this block again." }
-    Start-Sleep -Seconds $interval
-    try {
-        $token = Invoke-RestMethod -Method Post `
-            -Uri "https://login.microsoftonline.com/$tenantId/oauth2/v2.0/token" `
-            -Body @{
-                grant_type  = "urn:ietf:params:oauth:grant-type:device_code"
-                client_id   = $clientId
-                device_code = $deviceCodeResponse.device_code
-            }
-    } catch {
-        $err  = $_
-        $code = try { ($err.ErrorDetails.Message | ConvertFrom-Json).error } catch { $null }
-        switch ($code) {
-            'authorization_pending' { }                  # not signed in yet; keep waiting
-            'slow_down'             { $interval += 5 }   # server asked us to poll less often
-            default                 { throw $err }       # declined, expired, wrong tenant, etc.
-        }
-    }
-}
-
-$headers = @{ Authorization = "Bearer $($token.access_token)" }
-# Reuse $headers on every call below
+Connect-MgGraph -TenantId $tenantId -Scopes Policy.ReadWrite.CrossTenantAccess, Policy.ReadWrite.CrossTenantCapability -NoWelcome
+(Get-MgContext).TenantId  # confirm this matches $tenantId before changing anything
 ```
 
-Accept the consent prompt the first time, as in Step 4.
+Accept the consent prompt the first time, as in Step 4. When you're finished, especially on a shared machine, run `Disconnect-MgGraph` to sign out.
 
 ### Turn on M365 Collaboration trust (Layer 2)
 
@@ -325,8 +286,7 @@ $body = @{
     }
 } | ConvertTo-Json -Depth 6
 
-Invoke-RestMethod -Method Patch -Uri $partnerUri `
-    -Headers $headers -ContentType "application/json" -Body $body
+Invoke-MgGraphRequest -Method PATCH -Uri $partnerUri -Body $body -ContentType "application/json"
 ```
 
 A 404 means the partner isn't in the portal yet (Step 3).
@@ -353,9 +313,8 @@ $body = @{
     }
 } | ConvertTo-Json -Depth 6
 
-Invoke-RestMethod -Method Post `
-    -Uri "https://graph.microsoft.com/beta/policies/crossTenantAccessPolicy/partners/$partnerTenantId/m365Capabilities" `
-    -Headers $headers -ContentType "application/json" -Body $body
+Invoke-MgGraphRequest -Method POST -Body $body -ContentType "application/json" `
+    -Uri "https://graph.microsoft.com/beta/policies/crossTenantAccessPolicy/partners/$partnerTenantId/m365Capabilities"
 ```
 
 Then continue with [Step 5](#step-5-check-your-side-and-confirm-the-partners-side).

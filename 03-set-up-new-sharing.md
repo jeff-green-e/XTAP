@@ -49,6 +49,7 @@ There's no portal UI for Layers 2 and 3, so [Enable-XtapPartner.ps1](Enable-Xtap
 
 - **The scripts**: download `Enable-XtapPartner.ps1` and `Test-XtapPartner.ps1` into one folder and [unblock them](#unblock-the-downloaded-scripts).
 - **PowerShell 7** (5.1 should also work), opened in that folder. If the execution policy blocks the scripts, run `Set-ExecutionPolicy -Scope Process Bypass` (this window only).
+- **Microsoft.Graph.Authentication** PowerShell module. Most admins already have it; the scripts check and tell you if it's missing (`Install-Module Microsoft.Graph.Authentication -Scope CurrentUser`).
 - **Values**: `-TenantId` is *your* tenant; `-PartnerTenantId` is the partner's; `-Capability` only if you need more than Free/Busy times (names from [Before you start](#before-you-start), comma-separated).
 
 ### Unblock the downloaded scripts
@@ -77,7 +78,7 @@ Files from `git clone` don't need unblocking.
     -Capability crossTenantCalendarAvailabilityBasic, crossTenantMailTipsAll
 ```
 
-1. **Sign in.** Open the URL the script prints, enter the code, and sign in as a Global Administrator of **your** tenant.
+1. **Sign in.** An account picker or browser window opens; choose a Global Administrator account for **your** tenant. If this PowerShell window is already signed in to that tenant (for example from an earlier run), the script reuses it and doesn't ask. No usable browser, such as in a remote session? Add `-UseDeviceCode` and follow the code prompt instead.
 2. **Consent (first time per tenant).** Microsoft shows a **Permissions requested** prompt for Microsoft Graph Command Line Tools. The first two lines are what the script needs; the others are standard sign-in permissions. **Leave "Consent on behalf of your organization" unticked**, then select **Accept**.
 
    ![Permissions requested prompt for Microsoft Graph Command Line Tools, listing cross tenant access policies, M365 cross tenant access capabilities, basic profile, and maintain access, with the "Consent on behalf of your organization" checkbox unticked](images/05-consent-prompt.png)
@@ -104,7 +105,7 @@ Partner <partner-tenant-id>, as configured in tenant <your-tenant-id>
   Capability: crossTenantCalendarAvailabilityBasic: allowed for all users
 ```
 
-"Already on" or "no change" lines are fine, and rerunning is always safe (e.g. to add a capability later). `-WhatIf` previews without changing anything; `-Confirm:$false` skips the prompts.
+"Already on" or "no change" lines are fine, and rerunning is always safe (e.g. to add a capability later). `-WhatIf` previews without changing anything; `-Confirm:$false` skips the prompts. When you're finished, especially on a shared machine, run `Disconnect-MgGraph` to sign out.
 
 ### If the script stops
 
@@ -112,12 +113,14 @@ Partner <partner-tenant-id>, as configured in tenant <your-tenant-id>
 | --- | --- | --- |
 | `… is not digitally signed. You cannot run this script on the current system.` | The downloaded script is still blocked. | [Unblock it](#unblock-the-downloaded-scripts) and run it again. |
 | `… cannot be loaded because running scripts is disabled on this system.` | The execution policy blocks scripts. | Run `Set-ExecutionPolicy -Scope Process Bypass`, then run it again. |
+| `The Microsoft.Graph.Authentication module isn't installed` | The module is missing on this machine. | Run `Install-Module Microsoft.Graph.Authentication -Scope CurrentUser`, then run it again. |
+| `Signed in to tenant …, not …` | The sign-in (possibly reused from earlier) is for a different tenant. Nothing was changed. | Run `Disconnect-MgGraph`, then run it again and pick an account from the right tenant. |
 | `No cross-tenant access entry for partner …` | The partner isn't under Organizational settings. | Add it in the portal ([Step 1](#step-1-confirm-the-partner-organization-exists-in-entra-admin-center-layer-1)), then run the script again. |
 | `Layer 2: … already set to something other than 'allowed for all users'` | Someone limited or blocked the trust. The script won't widen it. | Check with whoever set it before changing anything. |
 | **Need admin approval** during sign-in | The account can't approve the tool's permissions itself. | Sign in as a Global Administrator. |
 | `403` / `Authorization_RequestDenied` | Not a Global Administrator, or consent was declined. | Sign in as a Global Administrator and accept the prompt. |
 | `Layer 2: skipped` or `Layer 3: skipped …` | You answered **N** (or used `-WhatIf`). | Run it again and answer **Y**. |
-| `The sign-in code expired` | Sign-in took too long (about 15 minutes). | Run it again. |
+| `The sign-in code expired` (with `-UseDeviceCode`) | Sign-in took too long (about 15 minutes). | Run it again. |
 | An `AADSTS…` error during sign-in | Usually a wrong `-TenantId`, or an account from another tenant. | Check the tenant ID and account. |
 | `Cannot validate argument on parameter 'Capability'` | Misspelled capability name. | Use a name from [Before you start](#before-you-start). |
 
@@ -137,7 +140,7 @@ Run the read-only check with the capabilities you granted:
 | Expected capability | PASS for each one listed | Rerun the enable script with the missing capability in `-Capability`. |
 | Capability | INFO lines listing what's granted | Nothing to do; this is for reference. |
 
-Its consent prompt asks for read-only permissions; leave **Consent on behalf of your organization** unticked. If a Global Reader gets **Need admin approval**, have a Global Administrator run it.
+If the same window is still signed in from the enable script, the check reuses that sign-in. Otherwise it asks for read-only permissions; leave **Consent on behalf of your organization** unticked. If a Global Reader gets **Need admin approval**, have a Global Administrator run it.
 
 Fix any FAIL before moving on. Keep the CSV for the change record.
 
@@ -184,7 +187,13 @@ A capability on the **default** policy applies to *every* Microsoft 365 organiza
 
 Use these instead of the Step 2 script only for group-limited grants, or when the script can't be run.
 
-**Sign in** with the [sign-in block](02-migrate-existing-sharing.md#sign-in) from Migrate Existing Sharing, with `$tenantId` set to your tenant. Run everything below in the same PowerShell window.
+**Sign in** (same as the scripts; add `-UseDeviceCode` if there's no browser). Run everything below in the same PowerShell window.
+
+```powershell
+$tenantId = "<your-tenant-id>"  # the op-co tenant you are configuring right now
+Connect-MgGraph -TenantId $tenantId -Scopes Policy.ReadWrite.CrossTenantAccess, Policy.ReadWrite.CrossTenantCapability -NoWelcome
+(Get-MgContext).TenantId  # confirm this matches $tenantId before changing anything
+```
 
 **Turn on M365 Collaboration trust (Layer 2).** Check first with [Test-XtapPartner.ps1](Test-XtapPartner.ps1): this replaces the current setting, so a limited or blocked trust would silently become "all users".
 
@@ -194,7 +203,7 @@ $partnerUri      = "https://graph.microsoft.com/beta/policies/crossTenantAccessP
 
 # Stop if the partner entry doesn't exist yet
 try {
-    Invoke-RestMethod -Method Get -Uri $partnerUri -Headers $headers | Out-Null
+    Invoke-MgGraphRequest -Method GET -Uri $partnerUri | Out-Null
 } catch {
     if ([int]$_.Exception.Response.StatusCode -eq 404) {
         throw "No partner entry for $partnerTenantId. Add the organization in Entra admin center first (Step 1)."
@@ -212,8 +221,7 @@ $body = @{
     }
 } | ConvertTo-Json -Depth 6
 
-Invoke-RestMethod -Method Patch -Uri $partnerUri `
-    -Headers $headers -ContentType "application/json" -Body $body
+Invoke-MgGraphRequest -Method PATCH -Uri $partnerUri -Body $body -ContentType "application/json"
 ```
 
 **Grant a capability (Layer 3).** Run once per capability:
@@ -236,9 +244,8 @@ $body = @{
     }
 } | ConvertTo-Json -Depth 6
 
-Invoke-RestMethod -Method Post `
-    -Uri "https://graph.microsoft.com/beta/policies/crossTenantAccessPolicy/partners/$partnerTenantId/m365Capabilities" `
-    -Headers $headers -ContentType "application/json" -Body $body
+Invoke-MgGraphRequest -Method POST -Body $body -ContentType "application/json" `
+    -Uri "https://graph.microsoft.com/beta/policies/crossTenantAccessPolicy/partners/$partnerTenantId/m365Capabilities"
 ```
 
 Then continue with [Step 3](#step-3-check-your-side).

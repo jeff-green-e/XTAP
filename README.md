@@ -10,4 +10,4 @@ Moving cross-tenant Free/Busy, MailTips, and Calendar Sharing between operating-
 | [Enable-XtapPartner.ps1](Enable-XtapPartner.ps1) | Turns on M365 Collaboration trust and grants capabilities (Layers 2 and 3) for one partner. Used by both runbooks. Never changes Layer 1, which is done in the portal. |
 | [Test-XtapPartner.ps1](Test-XtapPartner.ps1) | Read-only PASS/WARN/FAIL check of one partner, or every partner, in a tenant, with optional CSV. Doesn't check old EWS-era config. |
 
-The manual PowerShell snippets in the runbooks' appendices mirror the scripts; if you change one, update the other. Diagrams (SVG) and screenshots (PNG) are in `images/`.
+Both scripts need the Microsoft.Graph.Authentication PowerShell module and sign in with `Connect-MgGraph` (`-UseDeviceCode` if there's no browser). The manual PowerShell snippets in the runbooks' appendices mirror the scripts; if you change one, update the other. Diagrams (SVG) and screenshots (PNG) are in `images/`.
