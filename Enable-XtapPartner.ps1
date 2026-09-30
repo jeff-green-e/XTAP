@@ -1,8 +1,8 @@
 <#
 .SYNOPSIS
     Turns on M365 Collaboration trust (Layer 2) and grants M365 capabilities (Layer 3)
-    to a partner tenant, so the partner's users can see this tenant's Free/Busy, MailTips,
-    or shared calendars.
+    to one or more partner tenants, so their users can see this tenant's Free/Busy,
+    MailTips, or shared calendars.
 
 .DESCRIPTION
     Automates the PowerShell steps of the runbooks in this repo:
@@ -32,11 +32,16 @@
     Nothing is asked when everything is already set. Re-running is safe: settings that
     already exist are left alone, so you can run it again later to add another capability.
 
+    With several partners, each is handled in turn with the same capabilities. If one
+    partner can't be completed (for example it's missing from the portal), the script
+    reports it, carries on with the rest, and lists the problems at the end.
+
 .PARAMETER TenantId
     Your tenant: the one whose data the partner will be allowed to see.
 
 .PARAMETER PartnerTenantId
-    The partner tenant being granted access.
+    One or more partner tenants being granted access, separated by commas. They all get
+    the same capabilities; for different capabilities per partner, run the script again.
 
 .PARAMETER Capability
     One or more capabilities to grant. Default: crossTenantCalendarAvailabilityBasic
@@ -50,6 +55,10 @@
 .EXAMPLE
     # Free/busy times only (the default)
     .\Enable-XtapPartner.ps1 -TenantId <your-tenant-id> -PartnerTenantId <partner-tenant-id>
+
+.EXAMPLE
+    # Several partners at once (all get the same capabilities)
+    .\Enable-XtapPartner.ps1 -TenantId <your-tenant-id> -PartnerTenantId <partner-1>, <partner-2>, <partner-3>
 
 .EXAMPLE
     # Free/busy and all MailTips, in one run
@@ -82,7 +91,7 @@ param(
     [guid] $TenantId,
 
     [Parameter(Mandatory)]
-    [guid] $PartnerTenantId,
+    [guid[]] $PartnerTenantId,
 
     [ValidateSet(
         'crossTenantCalendarAvailabilityBasic',
@@ -100,11 +109,12 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-if ($TenantId -eq $PartnerTenantId) {
-    throw "TenantId and PartnerTenantId are the same. PartnerTenantId must be the OTHER tenant."
+$PartnerTenantId = @($PartnerTenantId | Select-Object -Unique)
+if ($PartnerTenantId -contains $TenantId) {
+    throw "PartnerTenantId includes your own TenantId. Partners must be the OTHER tenants."
 }
 
-$graphBase = "https://graph.microsoft.com/beta/policies/crossTenantAccessPolicy/partners/$PartnerTenantId"
+$partnersBase = "https://graph.microsoft.com/beta/policies/crossTenantAccessPolicy/partners"
 
 function Get-StatusCode($errorRecord) {
     try { return [int]$errorRecord.Exception.Response.StatusCode } catch { return $null }
@@ -153,106 +163,128 @@ if (-not $context -or $context.TenantId -ne "$TenantId") {
 }
 Write-Host "Signed in as $($context.Account) to tenant $TenantId." -ForegroundColor Green
 
-# --- Check the partner entry exists (Layer 1 is managed in the portal) ---------------------
+# --- Each partner: check entry (Layer 1), trust (Layer 2), capabilities (Layer 3) --------
 
-try {
-    $partner = Invoke-Graph GET $graphBase
-} catch {
-    if ((Get-StatusCode $_) -eq 404) {
-        throw ("No cross-tenant access entry for partner $PartnerTenantId. Add the organization in " +
-               "Entra admin center > Identity > External Identities > Cross-tenant access settings > " +
-               "Organizational settings, then run this again.")
-    }
-    throw
-}
+$problems = [System.Collections.Generic.List[string]]::new()
 
-# --- Layer 2: M365 Collaboration trust -----------------------------------------------------
+foreach ($partnerId in $PartnerTenantId) {
+    $graphBase = "$partnersBase/$partnerId"
+    Write-Host "`n=== Partner $partnerId ===" -ForegroundColor Cyan
 
-$current    = $partner.m365CollaborationInbound.users
-$allUsersOn = $current.accessType -eq 'allowed' -and
-              ($current.targets | Where-Object { $_.target -eq 'AllUsers' })
+    try {
+        # Partner entry must exist; Layer 1 is managed in the portal
+        try {
+            $partner = Invoke-Graph GET $graphBase
+        } catch {
+            if ((Get-StatusCode $_) -eq 404) {
+                throw ("No cross-tenant access entry for partner $partnerId. Add the organization in " +
+                       "Entra admin center > Identity > External Identities > Cross-tenant access settings > " +
+                       "Organizational settings, then run this again.")
+            }
+            throw
+        }
 
-if ($allUsersOn) {
-    Write-Host "Layer 2: M365 Collaboration trust is already on for all users. No change." -ForegroundColor Green
-} elseif ($current.accessType) {
-    # Someone has configured it differently (blocked, or scoped to specific users/groups).
-    # Don't widen it silently.
-    throw ("Layer 2: M365 Collaboration trust for this partner is already set to something other than " +
-           "'allowed for all users':`n" + ($current | ConvertTo-Json -Depth 6) +
-           "`nReview it with whoever configured it before changing it. This script won't overwrite it.")
-} else {
-    $body = @{
-        m365CollaborationInbound = @{
-            users = @{
-                accessType = "allowed"
-                targets    = @(@{ target = "AllUsers"; targetType = "user" })
+        # Layer 2: M365 Collaboration trust
+        $current    = $partner.m365CollaborationInbound.users
+        $allUsersOn = $current.accessType -eq 'allowed' -and
+                      ($current.targets | Where-Object { $_.target -eq 'AllUsers' })
+
+        if ($allUsersOn) {
+            Write-Host "Layer 2: M365 Collaboration trust is already on for all users. No change." -ForegroundColor Green
+        } elseif ($current.accessType) {
+            # Someone has configured it differently (blocked, or scoped to specific users/groups).
+            # Don't widen it silently.
+            throw ("Layer 2: M365 Collaboration trust for this partner is already set to something other than " +
+                   "'allowed for all users':`n" + ($current | ConvertTo-Json -Depth 6) +
+                   "`nReview it with whoever configured it before changing it. This script won't overwrite it.")
+        } else {
+            $body = @{
+                m365CollaborationInbound = @{
+                    users = @{
+                        accessType = "allowed"
+                        targets    = @(@{ target = "AllUsers"; targetType = "user" })
+                    }
+                }
+            } | ConvertTo-Json -Depth 6
+
+            if ($PSCmdlet.ShouldProcess("partner $partnerId", "Turn on M365 Collaboration trust for all users")) {
+                Invoke-Graph PATCH $graphBase $body | Out-Null
+                Write-Host "Layer 2: M365 Collaboration trust turned on." -ForegroundColor Green
+            } else {
+                Write-Host "Layer 2: skipped, not changed. Capabilities have no effect until it's on." -ForegroundColor Yellow
             }
         }
-    } | ConvertTo-Json -Depth 6
 
-    if ($PSCmdlet.ShouldProcess("partner $PartnerTenantId", "Turn on M365 Collaboration trust for all users")) {
-        Invoke-Graph PATCH $graphBase $body | Out-Null
-        Write-Host "Layer 2: M365 Collaboration trust turned on." -ForegroundColor Green
-    } else {
-        Write-Host "Layer 2: skipped, not changed. Capabilities have no effect until it's on." -ForegroundColor Yellow
-    }
-}
+        # Layer 3: capabilities
+        $existingCaps = (Invoke-Graph GET "$graphBase/m365Capabilities").value
 
-# --- Layer 3: grant the capabilities -------------------------------------------------------
+        foreach ($cap in $Capability | Select-Object -Unique) {
+            $odataType = "#microsoft.graph.$cap"
+            $existing  = $existingCaps | Where-Object { $_.'@odata.type' -eq $odataType }
 
-$existingCaps = (Invoke-Graph GET "$graphBase/m365Capabilities").value
+            if ($existing) {
+                Write-Host "Layer 3: already configured, no change ($(Format-Capability $existing))." -ForegroundColor Green
+                continue
+            }
 
-foreach ($cap in $Capability | Select-Object -Unique) {
-    $odataType = "#microsoft.graph.$cap"
-    $existing  = $existingCaps | Where-Object { $_.'@odata.type' -eq $odataType }
+            # All users. Microsoft's guide uses resourceType "group" for Calendar Sharing, "user" for the rest.
+            $resourceType = if ($cap -like 'crossTenantCalendarSharing*') { "group" } else { "user" }
 
-    if ($existing) {
-        Write-Host "Layer 3: already configured, no change ($(Format-Capability $existing))." -ForegroundColor Green
-        continue
-    }
+            $body = @{
+                "@odata.type" = $odataType
+                inboundAccess = @{
+                    isAllowed      = $true
+                    resourceScopes = @{
+                        included = @(@{ resourceId = "All"; resourceType = $resourceType })
+                        excluded = @()
+                    }
+                }
+            } | ConvertTo-Json -Depth 6
 
-    # All users. Microsoft's guide uses resourceType "group" for Calendar Sharing, "user" for the rest.
-    $resourceType = if ($cap -like 'crossTenantCalendarSharing*') { "group" } else { "user" }
-
-    $body = @{
-        "@odata.type" = $odataType
-        inboundAccess = @{
-            isAllowed      = $true
-            resourceScopes = @{
-                included = @(@{ resourceId = "All"; resourceType = $resourceType })
-                excluded = @()
+            if ($PSCmdlet.ShouldProcess("partner $partnerId", "Grant $cap (all users)")) {
+                Invoke-Graph POST "$graphBase/m365Capabilities" $body | Out-Null
+                Write-Host "Layer 3: granted $cap to partner (all users)." -ForegroundColor Green
+            } else {
+                Write-Host "Layer 3: skipped $cap, not changed." -ForegroundColor Yellow
             }
         }
-    } | ConvertTo-Json -Depth 6
 
-    if ($PSCmdlet.ShouldProcess("partner $PartnerTenantId", "Grant $cap (all users)")) {
-        Invoke-Graph POST "$graphBase/m365Capabilities" $body | Out-Null
-        Write-Host "Layer 3: granted $cap to partner (all users)." -ForegroundColor Green
-    } else {
-        Write-Host "Layer 3: skipped $cap, not changed." -ForegroundColor Yellow
+        # Result for this partner
+        $partner = Invoke-Graph GET $graphBase
+        $caps    = (Invoke-Graph GET "$graphBase/m365Capabilities").value
+
+        $collab = $partner.m365CollaborationInbound.users
+        $collabText = if ($collab.accessType) {
+            "$($collab.accessType) for $(@($collab.targets | ForEach-Object { if ($_.target -eq 'AllUsers') { 'all users' } else { $_.target } }) -join ', ')"
+        } else { "not set on this partner (inherits the default policy)" }
+
+        Write-Host "Partner $partnerId, as configured in tenant ${TenantId}:"
+        Write-Host "  M365 Collaboration trust: $collabText"
+        if ($caps) {
+            foreach ($c in $caps) { Write-Host "  Capability: $(Format-Capability $c)" }
+        } else {
+            Write-Host "  Capabilities: none"
+        }
+
+        # Raw Graph responses, for troubleshooting: run with -Verbose
+        Write-Verbose ("m365CollaborationInbound:`n" + ($partner.m365CollaborationInbound | ConvertTo-Json -Depth 6))
+        Write-Verbose ("m365Capabilities:`n" + ($caps | ConvertTo-Json -Depth 6))
+    } catch {
+        # Report and carry on with the next partner
+        Write-Host $_.Exception.Message -ForegroundColor Red
+        $problems.Add("${partnerId}: $((($_.Exception.Message -split "`n")[0]).TrimEnd(':'))")
     }
 }
 
-# --- Show the result -----------------------------------------------------------------------
+# --- Wrap up -------------------------------------------------------------------------------
 
-$partner = Invoke-Graph GET $graphBase
-$caps    = (Invoke-Graph GET "$graphBase/m365Capabilities").value
-
-$collab = $partner.m365CollaborationInbound.users
-$collabText = if ($collab.accessType) {
-    "$($collab.accessType) for $(@($collab.targets | ForEach-Object { if ($_.target -eq 'AllUsers') { 'all users' } else { $_.target } }) -join ', ')"
-} else { "not set on this partner (inherits the default policy)" }
-
-Write-Host "`nPartner $PartnerTenantId, as configured in tenant $TenantId" -ForegroundColor Cyan
-Write-Host "  M365 Collaboration trust: $collabText"
-if ($caps) {
-    foreach ($c in $caps) { Write-Host "  Capability: $(Format-Capability $c)" }
-} else {
-    Write-Host "  Capabilities: none"
+if ($problems.Count) {
+    Write-Host "`n$($problems.Count) of $($PartnerTenantId.Count) partner(s) not completed:" -ForegroundColor Red
+    foreach ($p in $problems) { Write-Host "  $p" -ForegroundColor Red }
 }
 
-# Raw Graph responses, for troubleshooting: run with -Verbose
-Write-Verbose ("m365CollaborationInbound:`n" + ($partner.m365CollaborationInbound | ConvertTo-Json -Depth 6))
-Write-Verbose ("m365Capabilities:`n" + ($caps | ConvertTo-Json -Depth 6))
+Write-Host "`nNext: each partner's admin runs this in their tenant with $TenantId as the partner, then test both directions (see the runbook's validation step)." -ForegroundColor Cyan
 
-Write-Host "`nNext: the partner's admin runs this in their tenant with $TenantId as the partner, then test both directions (see the runbook's validation step)." -ForegroundColor Cyan
+if ($problems.Count) {
+    throw "$($problems.Count) of $($PartnerTenantId.Count) partner(s) not completed; see the messages above."
+}

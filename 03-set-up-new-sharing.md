@@ -76,6 +76,9 @@ Files from `git clone` don't need unblocking.
 # Example: Free/Busy times and all MailTips
 .\Enable-XtapPartner.ps1 -TenantId <your-tenant-id> -PartnerTenantId <partner-tenant-id> `
     -Capability crossTenantCalendarAvailabilityBasic, crossTenantMailTipsAll
+
+# Several partners at once (all get the same capabilities)
+.\Enable-XtapPartner.ps1 -TenantId <your-tenant-id> -PartnerTenantId <partner-1>, <partner-2>, <partner-3>
 ```
 
 1. **Sign in.** An account picker or browser window opens; choose a Global Administrator account for **your** tenant. If this PowerShell window is already signed in to that tenant (for example from an earlier run), the script reuses it and doesn't ask. No usable browser, such as in a remote session? Add `-UseDeviceCode` and follow the code prompt instead.
@@ -105,6 +108,8 @@ Partner <partner-tenant-id>, as configured in tenant <your-tenant-id>
   Capability: crossTenantCalendarAvailabilityBasic: allowed for all users
 ```
 
+With several partners, each is handled in turn. If one can't be completed (for example it's missing from the portal), the others still go ahead and the end of the run lists what wasn't done. Answering **A** at a prompt accepts all remaining changes, for every partner in the run.
+
 "Already on" or "no change" lines are fine, and rerunning is always safe (e.g. to add a capability later). `-WhatIf` previews without changing anything; `-Confirm:$false` skips the prompts. When you're finished, especially on a shared machine, run `Disconnect-MgGraph` to sign out.
 
 ### If the script stops
@@ -122,6 +127,7 @@ Partner <partner-tenant-id>, as configured in tenant <your-tenant-id>
 | `Layer 2: skipped` or `Layer 3: skipped …` | You answered **N** (or used `-WhatIf`). | Run it again and answer **Y**. |
 | `The sign-in code expired` (with `-UseDeviceCode`) | Sign-in took too long (about 15 minutes). | Run it again. |
 | An `AADSTS…` error during sign-in | Usually a wrong `-TenantId`, or an account from another tenant. | Check the tenant ID and account. |
+| `N of M partner(s) not completed` | One or more partners in a multi-partner run hit one of the problems above. The others were done. | Fix the listed partners, then run the script again for them. |
 | `Cannot validate argument on parameter 'Capability'` | Misspelled capability name. | Use a name from [Before you start](#before-you-start). |
 
 ## Step 3: Check your side

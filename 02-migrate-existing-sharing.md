@@ -8,7 +8,7 @@ Last updated: September 29, 2026. New to this? Read [How It Works](01-how-it-wor
 
 EWS is being retired in Exchange Online: soft block from **October 1, 2026**, hard shutdown **April 1, 2027**. Cross-tenant Free/Busy, MailTips, and Calendar Sharing that ride on EWS move to **Microsoft 365 Cross-Tenant Access Policy (M365 XTAP)**. See [How It Works](01-how-it-works.md) for the three layers and what "inbound" means.
 
-**How the work repeats.** Discovery (Step 1) runs once per op-co tenant. Steps 3 to 5 run once per *partner* in each tenant. A pairing is ready to cut over (Step 6) only when *both* tenants have done Steps 3 to 5 for each other.
+**How the work repeats.** Discovery (Step 1) runs once per op-co tenant. Steps 3 to 5 cover every partner of that tenant; one Step 4 run can handle several partners. A pairing is ready to cut over (Step 6) only when *both* tenants have done Steps 3 to 5 for each other.
 
 ## Step 1: Discovery
 
@@ -90,7 +90,7 @@ Go to **Entra admin center → Identity → External Identities → Cross-tenant
 
 ## Step 4: Turn on sharing with Enable-XtapPartner.ps1 (Layers 2 and 3)
 
-Run once per partner. There's no portal UI for Layers 2 and 3, so the script does them: it turns on M365 Collaboration trust and grants the capabilities you choose. It won't change Layer 1 or overwrite a Layer 2 setting someone has limited.
+There's no portal UI for Layers 2 and 3, so the script does them for one or more partners: it turns on M365 Collaboration trust and grants the capabilities you choose. It won't change Layer 1 or overwrite a Layer 2 setting someone has limited.
 
 ### Choose capabilities
 
@@ -117,6 +117,9 @@ Match what Step 1 found. Names are case-sensitive.
 # Example: Free/Busy with subject and location, plus all MailTips
 .\Enable-XtapPartner.ps1 -TenantId <this-tenant-id> -PartnerTenantId <partner-tenant-id> `
     -Capability crossTenantCalendarAvailabilityLimitedDetails, crossTenantMailTipsAll
+
+# Several partners at once (all get the same capabilities)
+.\Enable-XtapPartner.ps1 -TenantId <this-tenant-id> -PartnerTenantId <partner-1>, <partner-2>, <partner-3>
 ```
 
 1. **Sign in.** An account picker or browser window opens; choose a Global Administrator account for **this** tenant. If this PowerShell window is already signed in to that tenant (for example from an earlier run), the script reuses it and doesn't ask. No usable browser, such as in a remote session? Add `-UseDeviceCode` and follow the code prompt instead.
@@ -145,6 +148,8 @@ Partner <partner-tenant-id>, as configured in tenant <this-tenant-id>
   Capability: crossTenantCalendarAvailabilityBasic: allowed for all users
 ```
 
+With several partners, each is handled in turn. If one can't be completed (for example it's missing from the portal), the others still go ahead and the end of the run lists what wasn't done. Answering **A** at a prompt accepts all remaining changes, for every partner in the run.
+
 "Already on" or "no change" lines are fine, and rerunning is always safe. `-WhatIf` previews without changing anything; `-Confirm:$false` skips the prompts. For errors, see [If the script stops](03-set-up-new-sharing.md#if-the-script-stops). When you're finished, especially on a shared machine, run `Disconnect-MgGraph` to sign out.
 
 **Both sides must do this:** A's admin runs it with B as the partner, and B's admin with A.
@@ -153,7 +158,7 @@ Partner <partner-tenant-id>, as configured in tenant <this-tenant-id>
 
 Each admin can only check their own tenant, so each checks their side and you compare results.
 
-**1. Check your side** with the capabilities you granted in Step 4:
+**1. Check your side** with the capabilities you granted in Step 4, once per partner (or leave out `-PartnerTenantId` and `-ExpectedCapability` to list every partner at once):
 
 ```powershell
 .\Test-XtapPartner.ps1 -TenantId <this-tenant-id> -PartnerTenantId <partner-tenant-id> `
